@@ -85,7 +85,10 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
             if port['network_id'] not in cached_networks:
                 cached_networks[port['network_id']] = (
                     port_context.network.current)
-
+        if not segment and (port['device_id'] or '').startswith('virl-'):
+            network = port_context.network.current
+            segment = {key: network['provider:' + key] for key in
+                (api.NETWORK_TYPE, api.SEGMENTATION_ID, api.PHYSICAL_NETWORK)}
         if not segment:
             LOG.warning(_LW("Device %(device)s requested by agent "
                             "%(agent_id)s on network %(network_id)s not "
@@ -115,6 +118,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                  'physical_network': segment[api.PHYSICAL_NETWORK],
                  'fixed_ips': port['fixed_ips'],
                  'device_owner': port['device_owner'],
+                 'device_id': port['device_id'],
                  'allowed_address_pairs': port['allowed_address_pairs'],
                  'port_security_enabled': port.get(psec.PORTSECURITY, True),
                  'profile': port[portbindings.PROFILE]}

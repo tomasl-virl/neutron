@@ -161,8 +161,11 @@ class IPWrapper(SubProcessBase):
             device.link.set_netns(self.namespace)
 
     def add_vxlan(self, name, vni, group=None, dev=None, ttl=None, tos=None,
-                  local=None, port=None, proxy=False):
-        cmd = ['add', name, 'type', 'vxlan', 'id', vni]
+                  local=None, port=None, mtu=None, proxy=False):
+        cmd = ['add', name]
+        if mtu:
+            cmd.extend(['mtu', mtu])
+        cmd.extend(['type', 'vxlan', 'id', vni])
         if group:
                 cmd.extend(['group', group])
         if dev:
@@ -591,6 +594,9 @@ class IpNetnsCommand(IpCommandBase):
 
 def device_exists(device_name, namespace=None):
     """Return True if the device exists in the namespace."""
+    if not namespace:
+        # Quicker (no subprocess), unlikely that a device wouldn't have a MAC
+        return os.path.exists(os.path.join(SYS_NET_PATH, device_name))
     try:
         dev = IPDevice(device_name, namespace=namespace)
         dev.set_log_fail_as_error(False)
