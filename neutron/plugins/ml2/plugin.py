@@ -1003,7 +1003,57 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         return bound_context._port
 
     def create_port_bulk(self, context, ports):
+        # Create ports which request fixed_ips first, to avoid conflicts
+        # with automatically assigned addresses from the pool
+        fixed_ports = list()
+        blank_ports = list()
+        fixed_indices = list()
+        for index, port in enumerate(ports['ports']):
+            fixed = port['port'].get('fixed_ips')
+            if fixed in (None, attributes.ATTR_NOT_SPECIFIED):
+                fixed = None
+            else:
+                for obj in fixed:
+                    if obj.get('ip_address'):
+                        break
+                else:
+                    fixed = None
+            if fixed:
+                fixed_ports.append(port)
+                fixed_indices.append(index)
+            else:
+                blank_ports.append(port)
+
+        if fixed_ports and blank_ports:
+            ports['ports'] = fixed_ports + blank_ports
+        else:
+            fixed_indices = None
+
         objects = self._create_bulk_ml2(attributes.PORT, context, ports)
+
+        # Recreate the original order of created objects
+        if fixed_indices:
+            reordered = [None] * len(objects)
+            fixed_iter = iter(fixed_indices)
+            fixed = next(fixed_iter)
+            blank = 0
+            for obj in objects:
+                # Fill in fixed ports while indices are not exhausted
+                if fixed is not None:
+                    reordered[fixed] = obj
+                    try:
+                        fixed = next(fixed_iter)
+                    except StopIteration:
+                        fixed = None
+                    continue
+
+                # Fill in blank spots for the rest
+                while reordered[blank] is not None:
+                    blank += 1
+                reordered[blank] = obj
+                blank += 1
+            
+            objects = reordered
 
         # REVISIT(rkukura): Is there any point in calling this before
         # a binding has been successfully established?
