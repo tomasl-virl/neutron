@@ -46,6 +46,7 @@ FAKE_IP2 = '10.0.0.2'
 class FakeVif(object):
     ofport = 99
     port_name = 'name'
+    vif_mac = '00:22:44:66:88:AA'
 
 
 class CreateAgentConfigMap(base.BaseTestCase):
@@ -102,6 +103,10 @@ class TestOvsNeutronAgent(base.BaseTestCase):
         notifier_cls = notifier_p.start()
         self.notifier = mock.Mock()
         notifier_cls.return_value = self.notifier
+        systemd_patch = mock.patch(
+            'neutron.openstack.common.systemd.notify_once')
+        self.systemd_notify = systemd_patch.start()
+
         cfg.CONF.set_default('firewall_driver',
                              'neutron.agent.firewall.NoopFirewallDriver',
                              group='SECURITYGROUP')
@@ -475,9 +480,12 @@ class TestOvsNeutronAgent(base.BaseTestCase):
         with mock.patch.object(self.agent.state_rpc,
                                "report_state") as report_st:
             self.agent.int_br_device_count = 5
+            self.systemd_notify.assert_not_called()
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
                                          self.agent.agent_state, True)
+            self.systemd_notify.assert_called_once_with()
+            self.systemd_notify.reset_mock()
             self.assertNotIn("start_flag", self.agent.agent_state)
             self.assertFalse(self.agent.use_call)
             self.assertEqual(
@@ -487,6 +495,7 @@ class TestOvsNeutronAgent(base.BaseTestCase):
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
                                          self.agent.agent_state, False)
+            self.systemd_notify.assert_not_called()
 
     def test_report_state_fail(self):
         with mock.patch.object(self.agent.state_rpc,
@@ -498,6 +507,7 @@ class TestOvsNeutronAgent(base.BaseTestCase):
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
                                          self.agent.agent_state, True)
+            self.systemd_notify.assert_not_called()
 
     def test_network_delete(self):
         with contextlib.nested(
@@ -1045,6 +1055,12 @@ class TestOvsNeutronAgent(base.BaseTestCase):
             self.agent.tunnel_delete(context=None, **kwargs)
             self.assertTrue(clean_tun_fn.called)
 
+    def test_reset_tunnel_ofports(self):
+        tunnel_handles = self.agent.tun_br_ofports
+        self.agent.tun_br_ofports = {'gre': {'10.10.10.10': '1'}}
+        self.agent._reset_tunnel_ofports()
+        self.assertEqual(self.agent.tun_br_ofports, tunnel_handles)
+
     def _test_ovs_status(self, *args):
         reply2 = {'current': set(['tap0']),
                   'added': set(['tap2']),
@@ -1053,6 +1069,8 @@ class TestOvsNeutronAgent(base.BaseTestCase):
         reply3 = {'current': set(['tap2']),
                   'added': set([]),
                   'removed': set(['tap0'])}
+
+        self.agent.enable_tunneling = True
 
         with contextlib.nested(
             mock.patch.object(async_process.AsyncProcess, "_spawn"),
@@ -1069,10 +1087,17 @@ class TestOvsNeutronAgent(base.BaseTestCase):
                               'setup_physical_bridges'),
             mock.patch.object(time, 'sleep'),
             mock.patch.object(ovs_neutron_agent.OVSNeutronAgent,
-                              'update_stale_ofport_rules')
+                              'update_stale_ofport_rules'),
+            mock.patch.object(ovs_neutron_agent.OVSNeutronAgent,
+                              'reset_tunnel_br'),
+            mock.patch.object(ovs_neutron_agent.OVSNeutronAgent,
+                              'setup_tunnel_br'),
+            mock.patch.object(ovs_neutron_agent.OVSNeutronAgent,
+                              '_reset_tunnel_ofports')
         ) as (spawn_fn, log_exception, scan_ports, process_network_ports,
               check_ovs_status, setup_int_br, setup_phys_br, time_sleep,
-              update_stale):
+              update_stale, reset_tunnel_br, setup_tunnel_br,
+              reset_tunnel_ofports):
             log_exception.side_effect = Exception(
                 'Fake exception to get out of the loop')
             scan_ports.side_effect = [reply2, reply3]
@@ -1097,6 +1122,11 @@ class TestOvsNeutronAgent(base.BaseTestCase):
         # re-setup the bridges
         setup_int_br.assert_has_calls([mock.call()])
         setup_phys_br.assert_has_calls([mock.call({})])
+        # Ensure that tunnel handles are reset and bridge
+        # and flows reconfigured.
+        self.assertTrue(reset_tunnel_br.called)
+        self.assertTrue(reset_tunnel_ofports.called)
+        self.assertTrue(setup_tunnel_br.called)
 
     def test_ovs_status(self):
         self._test_ovs_status(constants.OVS_NORMAL,
@@ -1138,6 +1168,13 @@ class TestOvsNeutronAgent(base.BaseTestCase):
         self.agent.treat_devices_added_or_updated([], False)
         self.assertFalse(self.agent.setup_arp_spoofing_protection.called)
 
+    def test_arp_spoofing_network_port(self):
+        int_br = mock.create_autospec(self.agent.int_br)
+        self.agent.setup_arp_spoofing_protection(
+            int_br, FakeVif(), {'device_owner': 'network:router_interface'})
+        self.assertTrue(int_br.delete_flows.called)
+        self.assertFalse(int_br.add_flow.called)
+
     def test_arp_spoofing_port_security_disabled(self):
         int_br = mock.Mock()
         self.agent.setup_arp_spoofing_protection(
@@ -1146,9 +1183,10 @@ class TestOvsNeutronAgent(base.BaseTestCase):
 
     def test_arp_spoofing_basic_rule_setup(self):
         vif = FakeVif()
-        fake_details = {'fixed_ips': []}
+        fake_details = {'fixed_ips': [], 'device_owner': 'nobody'}
         self.agent.prevent_arp_spoofing = True
         int_br = mock.Mock()
+        int_br.dump_flows_for_table.return_value = ''
         self.agent.setup_arp_spoofing_protection(int_br, vif, fake_details)
         int_br.delete_flows.assert_has_calls(
             [mock.call(table=mock.ANY, in_port=vif.ofport)])
@@ -1164,20 +1202,24 @@ class TestOvsNeutronAgent(base.BaseTestCase):
     def test_arp_spoofing_fixed_and_allowed_addresses(self):
         vif = FakeVif()
         fake_details = {
+            'device_owner': 'nobody',
             'fixed_ips': [{'ip_address': '192.168.44.100'},
                           {'ip_address': '192.168.44.101'}],
-            'allowed_address_pairs': [{'ip_address': '192.168.44.102/32'},
-                                      {'ip_address': '192.168.44.103/32'}]
+            'allowed_address_pairs': [{'ip_address': '192.168.44.102/32',
+                                       'mac_address': FAKE_MAC},
+                                      {'ip_address': '192.168.44.103/32',
+                                       'mac_address': FAKE_MAC}]
         }
         self.agent.prevent_arp_spoofing = True
         int_br = mock.Mock()
+        int_br.dump_flows_for_table.return_value = ''
         self.agent.setup_arp_spoofing_protection(int_br, vif, fake_details)
         # make sure all addresses are allowed
         for addr in ('192.168.44.100', '192.168.44.101', '192.168.44.102/32',
                      '192.168.44.103/32'):
             int_br.add_flow.assert_any_call(
                 table=constants.ARP_SPOOF_TABLE, in_port=vif.ofport,
-                proto='arp', actions='NORMAL', arp_spa=addr, priority=mock.ANY)
+                proto='arp', actions=mock.ANY, arp_spa=addr, priority=mock.ANY)
 
     def test__get_ofport_moves(self):
         previous = {'port1': 1, 'port2': 2}
@@ -1640,6 +1682,25 @@ class TestOvsDvrNeutronAgent(base.BaseTestCase):
 
     def test_port_bound_for_dvr_with_csnat_ports(self, ofport=10):
         self._setup_for_dvr_test()
+        int_br, tun_br = self._port_bound_for_dvr_with_csnat_ports()
+        self.assertTrue(int_br.called)
+        self.assertTrue(tun_br.called)
+
+    def test_port_bound_for_dvr_with_csnat_ports_ofport_change(self):
+        self._setup_for_dvr_test()
+        self._port_bound_for_dvr_with_csnat_ports()
+        # simulate a replug
+        self._port.ofport = 12
+        int_br, tun_br = self._port_bound_for_dvr_with_csnat_ports()
+        self.assertTrue(int_br.called)
+        # a local vlan was already provisioned so there should be no new
+        # calls to tunbr
+        self.assertFalse(tun_br.called)
+        # make sure ofport was updated
+        self.assertEqual(12,
+            self.agent.dvr_agent.local_ports[self._port.vif_id].ofport)
+
+    def _port_bound_for_dvr_with_csnat_ports(self):
         with mock.patch('neutron.agent.common.ovs_lib.OVSBridge.'
                         'set_db_attribute',
                         return_value=True):
@@ -1673,6 +1734,7 @@ class TestOvsDvrNeutronAgent(base.BaseTestCase):
                     False)
                 self.assertTrue(add_flow_int_fn.called)
                 self.assertTrue(delete_flows_int_fn.called)
+                return add_flow_int_fn, add_flow_tun_fn
 
     def test_treat_devices_removed_for_dvr_interface(self, ofport=10):
         self._test_treat_devices_removed_for_dvr_interface(ofport)

@@ -40,6 +40,9 @@ class FakeIpDevice(object):
     def __init__(self):
         self.link = FakeIpLinkCommand()
 
+    def disable_ipv6(self):
+        pass
+
 
 class TestLinuxBridge(base.BaseTestCase):
 
@@ -105,6 +108,7 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
 
     def test_treat_devices_removed_with_existed_device(self):
         agent = self.agent
+        agent._ensure_port_admin_state = mock.Mock()
         devices = [DEVICE_1]
         with contextlib.nested(
             mock.patch.object(agent.plugin_rpc, "update_device_down"),
@@ -153,11 +157,22 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
                 self.assertTrue(fn_udd.called)
                 self.assertTrue(fn_rdf.called)
 
+    def test__get_devices_locally_modified(self):
+        new_ts = {1: 1000, 2: 2000, 3: 3000}
+        old_ts = {1: 10, 2: 2000, 4: 900}
+        # 3 and 4 are not returned because 3 is a new device and 4 is a
+        # removed device
+        self.assertEqual(
+            set([1]),
+            self.agent._get_devices_locally_modified(new_ts, old_ts))
+
     def _test_scan_devices(self, previous, updated,
-                           fake_current, expected, sync):
+                           fake_current, expected, sync,
+                           fake_ts_current=None):
         self.agent.br_mgr = mock.Mock()
         self.agent.br_mgr.get_tap_devices.return_value = fake_current
-
+        self.agent.br_mgr.get_devices_modified_timestamps.return_value = (
+            fake_ts_current or {})
         self.agent.updated_devices = updated
         results = self.agent.scan_devices(previous, sync)
         self.assertEqual(expected, results)
@@ -166,28 +181,49 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
         previous = {'current': set([1, 2]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
         fake_current = set([1, 2])
         updated = set()
         expected = {'current': set([1, 2]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
 
         self._test_scan_devices(previous, updated, fake_current, expected,
                                 sync=False)
+
+    def test_scan_devices_timestamp_triggers_updated(self):
+        previous = {'current': set([1, 2]),
+                    'updated': set(),
+                    'added': set(),
+                    'removed': set(),
+                    'timestamps': {2: 600}}
+        fake_current = set([1, 2])
+        updated = set()
+        expected = {'current': set([1, 2]),
+                    'updated': set([2]),
+                    'added': set(),
+                    'removed': set(),
+                    'timestamps': {2: 1000}}
+
+        self._test_scan_devices(previous, updated, fake_current, expected,
+                                sync=False, fake_ts_current={2: 1000})
 
     def test_scan_devices_added_removed(self):
         previous = {'current': set([1, 2]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
         fake_current = set([2, 3])
         updated = set()
         expected = {'current': set([2, 3]),
                     'updated': set(),
                     'added': set([3]),
-                    'removed': set([1])}
+                    'removed': set([1]),
+                    'timestamps': {}}
 
         self._test_scan_devices(previous, updated, fake_current, expected,
                                 sync=False)
@@ -196,13 +232,15 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
         previous = {'current': set([2, 3]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set([1])}
+                    'removed': set([1]),
+                    'timestamps': {}}
         fake_current = set([2, 3])
         updated = set()
         expected = {'current': set([2, 3]),
                     'updated': set(),
                     'added': set([2, 3]),
-                    'removed': set([1])}
+                    'removed': set([1]),
+                    'timestamps': {}}
 
         self._test_scan_devices(previous, updated, fake_current, expected,
                                 sync=True)
@@ -211,7 +249,8 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
         previous = {'current': set([2, 3]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set([1])}
+                    'removed': set([1]),
+                    'timestamps': {}}
         # Device 2 disappeared.
         fake_current = set([3])
         updated = set()
@@ -219,7 +258,8 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
         expected = {'current': set([3]),
                     'updated': set(),
                     'added': set([3]),
-                    'removed': set([1, 2])}
+                    'removed': set([1, 2]),
+                    'timestamps': {}}
 
         self._test_scan_devices(previous, updated, fake_current, expected,
                                 sync=True)
@@ -228,13 +268,15 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
         previous = {'current': set([1, 2]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
         fake_current = set([1, 2])
         updated = set([1])
         expected = {'current': set([1, 2]),
                     'updated': set([1]),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
 
         self._test_scan_devices(previous, updated, fake_current, expected,
                                 sync=False)
@@ -243,13 +285,15 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
         previous = {'current': set([1, 2]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
         fake_current = set([1, 2])
         updated = set([3])
         expected = {'current': set([1, 2]),
                     'updated': set(),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
 
         self._test_scan_devices(previous, updated, fake_current, expected,
                                 sync=False)
@@ -258,13 +302,15 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
         previous = {'current': set([1, 2]),
                     'updated': set([1]),
                     'added': set(),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
         fake_current = set([1, 2])
         updated = set([2])
         expected = {'current': set([1, 2]),
                     'updated': set([1, 2]),
                     'added': set([1, 2]),
-                    'removed': set()}
+                    'removed': set(),
+                    'timestamps': {}}
 
         self._test_scan_devices(previous, updated, fake_current, expected,
                                 sync=True)
@@ -290,6 +336,25 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
                                                                   'tap4']))
         agent.treat_devices_removed.assert_called_with(set(['tap1']))
 
+    def test_treat_devices_added_updated_no_local_interface(self):
+        agent = self.agent
+        mock_details = {'device': 'dev123',
+                        'port_id': 'port123',
+                        'network_id': 'net123',
+                        'admin_state_up': True,
+                        'network_type': 'vlan',
+                        'segmentation_id': 100,
+                        'physical_network': 'physnet1',
+                        'device_owner': constants.DEVICE_OWNER_NETWORK_PREFIX}
+        agent.ext_manager = mock.Mock()
+        agent.plugin_rpc = mock.Mock()
+        agent.plugin_rpc.get_devices_details_list.return_value = [mock_details]
+        agent.mgr = mock.Mock()
+        agent.mgr.plug_interface.return_value = False
+        agent.mgr.ensure_port_admin_state = mock.Mock()
+        agent.treat_devices_added_updated(set(['tap1']))
+        self.assertFalse(agent.mgr.ensure_port_admin_state.called)
+
     def test_treat_devices_added_updated_admin_state_up_true(self):
         agent = self.agent
         mock_details = {'device': 'dev123',
@@ -298,36 +363,38 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
                         'admin_state_up': True,
                         'network_type': 'vlan',
                         'segmentation_id': 100,
-                        'physical_network': 'physnet1'}
+                        'physical_network': 'physnet1',
+                        'device_owner': constants.DEVICE_OWNER_NETWORK_PREFIX}
         agent.plugin_rpc = mock.Mock()
         agent.plugin_rpc.get_devices_details_list.return_value = [mock_details]
         agent.br_mgr = mock.Mock()
         agent.br_mgr.add_interface.return_value = True
+        agent._ensure_port_admin_state = mock.Mock()
         resync_needed = agent.treat_devices_added_updated(set(['tap1']))
 
         self.assertFalse(resync_needed)
-        agent.br_mgr.add_interface.assert_called_with('net123', 'vlan',
-                                                      'physnet1', 100,
-                                                      'port123')
+        agent.br_mgr.add_interface.assert_called_with(
+                                      'net123', 'vlan', 'physnet1',
+                                      100, 'port123',
+                                      constants.DEVICE_OWNER_NETWORK_PREFIX)
         self.assertTrue(agent.plugin_rpc.update_device_up.called)
 
-    def test_treat_devices_added_updated_admin_state_up_false(self):
-        agent = self.agent
-        mock_details = {'device': 'dev123',
-                        'port_id': 'port123',
-                        'network_id': 'net123',
-                        'admin_state_up': False,
-                        'network_type': 'vlan',
-                        'segmentation_id': 100,
-                        'physical_network': 'physnet1'}
-        agent.plugin_rpc = mock.Mock()
-        agent.plugin_rpc.get_devices_details_list.return_value = [mock_details]
-        agent.remove_port_binding = mock.Mock()
-        resync_needed = agent.treat_devices_added_updated(set(['tap1']))
+    def _test_ensure_port_admin_state(self, admin_state):
+        port_id = 'fake_id'
+        with mock.patch.object(ip_lib, 'IPDevice') as dev_mock:
+            self.agent._ensure_port_admin_state(port_id, admin_state)
 
-        self.assertFalse(resync_needed)
-        agent.remove_port_binding.assert_called_with('net123', 'port123')
-        self.assertFalse(agent.plugin_rpc.update_device_up.called)
+        tap_name = self.agent.br_mgr.get_tap_device_name(port_id)
+        self.assertEqual(admin_state,
+                         dev_mock(tap_name).link.set_up.called)
+        self.assertNotEqual(admin_state,
+                            dev_mock(tap_name).link.set_down.called)
+
+    def test_ensure_port_admin_state_up(self):
+        self._test_ensure_port_admin_state(True)
+
+    def test_ensure_port_admin_state_down(self):
+        self._test_ensure_port_admin_state(False)
 
 
 class TestLinuxBridgeManager(base.BaseTestCase):
@@ -508,14 +575,14 @@ class TestLinuxBridgeManager(base.BaseTestCase):
             de_fn.return_value = True
             self.assertEqual(self.lbm.ensure_vlan("eth0", "1"), "eth0.1")
             de_fn.return_value = False
-            with mock.patch.object(utils, 'execute') as exec_fn:
-                exec_fn.return_value = False
-                self.assertEqual(self.lbm.ensure_vlan("eth0", "1"), "eth0.1")
-                # FIXME(kevinbenton): validate the params to the exec_fn calls
-                self.assertEqual(exec_fn.call_count, 2)
-                exec_fn.return_value = True
-                self.assertIsNone(self.lbm.ensure_vlan("eth0", "1"))
-                self.assertEqual(exec_fn.call_count, 3)
+            vlan_dev = FakeIpDevice()
+            with mock.patch.object(vlan_dev, 'disable_ipv6') as dv6_fn,\
+                    mock.patch.object(self.lbm.ip, 'add_vlan',
+                            return_value=vlan_dev) as add_vlan_fn:
+                retval = self.lbm.ensure_vlan("eth0", "1")
+                self.assertEqual("eth0.1", retval)
+                add_vlan_fn.assert_called_with('eth0.1', 'eth0', '1')
+                dv6_fn.assert_called_once_with()
 
     def test_ensure_vxlan(self):
         seg_id = "12345678"
@@ -525,14 +592,16 @@ class TestLinuxBridgeManager(base.BaseTestCase):
             de_fn.return_value = True
             self.assertEqual(self.lbm.ensure_vxlan(seg_id), "vxlan-" + seg_id)
             de_fn.return_value = False
-            with mock.patch.object(self.lbm.ip,
-                                   'add_vxlan') as add_vxlan_fn:
-                add_vxlan_fn.return_value = FakeIpDevice()
-                self.assertEqual(self.lbm.ensure_vxlan(seg_id),
-                                 "vxlan-" + seg_id)
+            vxlan_dev = FakeIpDevice()
+            with mock.patch.object(vxlan_dev, 'disable_ipv6') as dv6_fn,\
+                    mock.patch.object(self.lbm.ip, 'add_vxlan',
+                            return_value=vxlan_dev) as add_vxlan_fn:
+                retval = self.lbm.ensure_vxlan(seg_id)
+                self.assertEqual("vxlan-" + seg_id, retval)
                 add_vxlan_fn.assert_called_with("vxlan-" + seg_id, seg_id,
                                                 group="224.0.0.1",
                                                 dev=self.lbm.local_int)
+                dv6_fn.assert_called_once_with()
                 cfg.CONF.set_override('l2_population', 'True', 'VXLAN')
                 self.assertEqual(self.lbm.ensure_vxlan(seg_id),
                                  "vxlan-" + seg_id)
@@ -643,13 +712,21 @@ class TestLinuxBridgeManager(base.BaseTestCase):
             )
             self.assertTrue(vlbr_fn.called)
 
-    def test_add_tap_interface(self):
+    def test_add_tap_interface_owner_other(self):
+        with mock.patch.object(ip_lib, "device_exists"):
+            with mock.patch.object(self.lbm, "ensure_local_bridge"):
+                self.assertTrue(self.lbm.add_tap_interface("123",
+                                                           p_const.TYPE_LOCAL,
+                                                           "physnet1", None,
+                                                           "tap1", "foo"))
+
+    def _test_add_tap_interface(self, dev_owner_prefix):
         with mock.patch.object(ip_lib, "device_exists") as de_fn:
             de_fn.return_value = False
             self.assertFalse(
                 self.lbm.add_tap_interface("123", p_const.TYPE_VLAN,
-                                           "physnet1", "1", "tap1")
-            )
+                                           "physnet1", "1", "tap1",
+                                           dev_owner_prefix))
 
             de_fn.return_value = True
             with contextlib.nested(
@@ -662,7 +739,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                 self.assertTrue(self.lbm.add_tap_interface("123",
                                                            p_const.TYPE_LOCAL,
                                                            "physnet1", None,
-                                                           "tap1"))
+                                                           "tap1",
+                                                           dev_owner_prefix))
                 en_fn.assert_called_with("123")
 
                 get_br.return_value = False
@@ -670,7 +748,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                 self.assertFalse(self.lbm.add_tap_interface("123",
                                                             p_const.TYPE_LOCAL,
                                                             "physnet1", None,
-                                                            "tap1"))
+                                                            "tap1",
+                                                            dev_owner_prefix))
 
             with contextlib.nested(
                 mock.patch.object(self.lbm, "ensure_physical_in_bridge"),
@@ -681,20 +760,30 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                 self.assertFalse(self.lbm.add_tap_interface("123",
                                                             p_const.TYPE_VLAN,
                                                             "physnet1", "1",
-                                                            "tap1"))
+                                                            "tap1",
+                                                            dev_owner_prefix))
 
                 ens_fn.return_value = "eth0.1"
                 get_br.return_value = "brq123"
                 self.lbm.add_tap_interface("123", p_const.TYPE_VLAN,
-                                           "physnet1", "1", "tap1")
+                                           "physnet1", "1", "tap1",
+                                           dev_owner_prefix)
                 en_mtu_fn.assert_called_once_with("tap1", "eth0.1")
+
+    def test_add_tap_interface_owner_network(self):
+        self._test_add_tap_interface(constants.DEVICE_OWNER_NETWORK_PREFIX)
+
+    def test_add_tap_interface_owner_neutron(self):
+        self._test_add_tap_interface(constants.DEVICE_OWNER_NEUTRON_PREFIX)
 
     def test_add_interface(self):
         with mock.patch.object(self.lbm, "add_tap_interface") as add_tap:
             self.lbm.add_interface("123", p_const.TYPE_VLAN, "physnet-1",
-                                   "1", "234")
+                                   "1", "234",
+                                   constants.DEVICE_OWNER_NETWORK_PREFIX)
             add_tap.assert_called_with("123", p_const.TYPE_VLAN, "physnet-1",
-                                       "1", "tap234")
+                                       "1", "tap234",
+                                       constants.DEVICE_OWNER_NETWORK_PREFIX)
 
     def test_delete_vlan_bridge(self):
         with contextlib.nested(

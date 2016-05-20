@@ -13,6 +13,8 @@
 # under the License.
 #
 
+import functools
+
 import netaddr
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -23,8 +25,10 @@ from sqlalchemy import orm
 
 from neutron.api.v2 import attributes
 from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron.common import utils as n_utils
 from neutron.db import agents_db
+from neutron.db import common_db_mixin
 from neutron.db import l3_dvr_db
 from neutron.db import model_base
 from neutron.db import models_v2
@@ -235,7 +239,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
 
     def _create_ha_network_tenant_binding(self, context, tenant_id,
                                           network_id):
-        with context.session.begin(subtransactions=True):
+        with context.session.begin(nested=True):
             ha_network = L3HARouterNetwork(tenant_id=tenant_id,
                                            network_id=network_id)
             context.session.add(ha_network)
@@ -260,15 +264,15 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
                  'status': constants.NET_STATUS_ACTIVE}}
         self._add_ha_network_settings(args['network'])
 
-        network = self._core_plugin.create_network(admin_ctx, args)
-        try:
-            ha_network = self._create_ha_network_tenant_binding(admin_ctx,
-                                                                tenant_id,
-                                                                network['id'])
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                self._core_plugin.delete_network(admin_ctx, network['id'])
+        creation = functools.partial(self._core_plugin.create_network,
+                                     admin_ctx, args)
+        content = functools.partial(self._create_ha_network_tenant_binding,
+                                    admin_ctx, tenant_id)
+        deletion = functools.partial(self._core_plugin.delete_network,
+                                     admin_ctx)
 
+        network, ha_network = common_db_mixin.safe_creation(
+            context, creation, deletion, content)
         try:
             self._create_ha_subnet(admin_ctx, network['id'], tenant_id)
         except Exception:
@@ -304,8 +308,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
 
         return num_agents
 
-    def _create_ha_port_binding(self, context, port_id, router_id):
-        with context.session.begin(subtransactions=True):
+    def _create_ha_port_binding(self, context, router_id, port_id):
+        with context.session.begin(nested=True):
             portbinding = L3HARouterAgentPortBinding(port_id=port_id,
                                                      router_id=router_id)
             context.session.add(portbinding)
@@ -313,23 +317,24 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
         return portbinding
 
     def add_ha_port(self, context, router_id, network_id, tenant_id):
-        port = self._core_plugin.create_port(context, {
-            'port':
-            {'tenant_id': '',
-             'network_id': network_id,
-             'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
-             'mac_address': attributes.ATTR_NOT_SPECIFIED,
-             'admin_state_up': True,
-             'device_id': router_id,
-             'device_owner': constants.DEVICE_OWNER_ROUTER_HA_INTF,
-             'name': constants.HA_PORT_NAME % tenant_id}})
+        args = {'tenant_id': '',
+                'network_id': network_id,
+                'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
+                'mac_address': attributes.ATTR_NOT_SPECIFIED,
+                'admin_state_up': True,
+                'device_id': router_id,
+                'device_owner': constants.DEVICE_OWNER_ROUTER_HA_INTF,
+                'name': constants.HA_PORT_NAME % tenant_id}
 
-        try:
-            return self._create_ha_port_binding(context, port['id'], router_id)
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                self._core_plugin.delete_port(context, port['id'],
-                                              l3_port_check=False)
+        creation = functools.partial(self._core_plugin.create_port,
+                                     context, {'port': args})
+        content = functools.partial(self._create_ha_port_binding, context,
+                                    router_id)
+        deletion = functools.partial(self._core_plugin.delete_port, context,
+                                     l3_port_check=False)
+        port, bindings = common_db_mixin.safe_creation(context, creation,
+                                                       deletion, content)
+        return bindings
 
     def _create_ha_interfaces(self, context, router, ha_network):
         admin_ctx = context.elevated()
@@ -358,6 +363,15 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
 
         for port in ports:
             self._core_plugin.delete_port(admin_ctx, port['id'],
+                                          l3_port_check=False)
+
+    def delete_ha_interfaces_on_host(self, context, router_id, host):
+        admin_ctx = context.elevated()
+        port_ids = (binding.port_id for binding
+                    in self.get_ha_router_port_bindings(admin_ctx,
+                                                        [router_id], host))
+        for port_id in port_ids:
+            self._core_plugin.delete_port(admin_ctx, port_id,
                                           l3_port_check=False)
 
     def _notify_ha_interfaces_updated(self, context, router_id):
@@ -461,10 +475,32 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
 
         return query.all()
 
+    def _get_bindings_and_update_router_state_for_dead_agents(self, context,
+                                                              router_id):
+        """Return bindings. In case if dead agents were detected update router
+           states on this agent.
+
+        """
+        with context.session.begin(subtransactions=True):
+            bindings = self.get_ha_router_port_bindings(context, [router_id])
+            dead_agents = [
+                binding.agent for binding in bindings
+                if binding.state == constants.HA_ROUTER_STATE_ACTIVE and
+                not binding.agent.is_active]
+            for dead_agent in dead_agents:
+                self.update_routers_states(
+                    context, {router_id: constants.HA_ROUTER_STATE_STANDBY},
+                    dead_agent.host)
+
+        if dead_agents:
+            return self.get_ha_router_port_bindings(context, [router_id])
+        return bindings
+
     def get_l3_bindings_hosting_router_with_ha_states(
             self, context, router_id):
         """Return a list of [(agent, ha_state), ...]."""
-        bindings = self.get_ha_router_port_bindings(context, [router_id])
+        bindings = self._get_bindings_and_update_router_state_for_dead_agents(
+            context, router_id)
         return [(binding.agent, binding.state) for binding in bindings
                 if binding.agent is not None]
 
@@ -500,7 +536,9 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
             if interface:
                 self._populate_subnets_for_ports(context, [interface])
 
-        return routers_dict.values()
+        # we don't want to return HA routers without HA interfaces created yet
+        return [r for r in list(routers_dict.values())
+                if not r.get('ha') or r.get(constants.HA_INTERFACE_KEY)]
 
     def get_ha_sync_data_for_host(self, context, host=None, router_ids=None,
                                   active=None):
@@ -549,6 +587,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
             try:
                 self._core_plugin.update_port(admin_ctx, port['id'],
                                               {attributes.PORT: port})
-            except (orm.exc.StaleDataError, orm.exc.ObjectDeletedError):
+            except (orm.exc.StaleDataError, orm.exc.ObjectDeletedError,
+                    n_exc.PortNotFound):
                 # Take concurrently deleted interfaces in to account
                 pass

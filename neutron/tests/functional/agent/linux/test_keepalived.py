@@ -19,6 +19,7 @@ from neutron.agent.linux import external_process
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils
 from neutron.tests import base
+from neutron.tests.functional.agent.linux import helpers
 from neutron.tests.unit.agent.linux import test_keepalived
 
 
@@ -49,15 +50,55 @@ class KeepalivedManagerTestCase(base.BaseTestCase,
         self.assertEqual(self.expected_config.get_config_str(),
                          self.manager.get_conf_on_disk())
 
-    def test_keepalived_respawns(self):
+    def _test_keepalived_respawns(self, normal_exit=True):
         self.manager.spawn()
         process = self.manager.get_process()
+        pid = process.pid
         self.assertTrue(process.active)
 
-        process.disable(sig='15')
+        exit_code = '-15' if normal_exit else '-9'
 
+        # Exit the process, and see that when it comes back
+        # It's indeed a different process
+        utils.execute(['kill', exit_code, pid], run_as_root=True)
         utils.wait_until_true(
             lambda: process.active,
             timeout=5,
             sleep=0.01,
             exception=RuntimeError(_("Keepalived didn't respawn")))
+
+    def test_keepalived_respawns(self):
+        self._test_keepalived_respawns()
+
+    def test_keepalived_respawn_with_unexpected_exit(self):
+        self._test_keepalived_respawns(False)
+
+    def _test_keepalived_spawns_conflicting_pid(self, process, pid_file):
+        # Test the situation when keepalived PID file contains PID of an
+        # existing non-keepalived process. This situation can happen e.g.
+        # after hard node reset.
+
+        spawn_process = helpers.SleepyProcessFixture()
+        self.useFixture(spawn_process)
+
+        with open(pid_file, "w") as f_pid_file:
+            f_pid_file.write("%s" % spawn_process.pid)
+
+        self.manager.spawn()
+        utils.wait_until_true(
+            lambda: process.active,
+            timeout=5,
+            sleep=0.1,
+            exception=RuntimeError(_("Keepalived didn't spawn")))
+
+    def test_keepalived_spawns_conflicting_pid_base_process(self):
+        process = self.manager.get_process()
+        pid_file = process.get_pid_file_name()
+        self._test_keepalived_spawns_conflicting_pid(process, pid_file)
+
+    def test_keepalived_spawns_conflicting_pid_vrrp_subprocess(self):
+        process = self.manager.get_process()
+        pid_file = process.get_pid_file_name()
+        self._test_keepalived_spawns_conflicting_pid(
+            process,
+            self.manager.get_vrrp_pid_file_name(pid_file))

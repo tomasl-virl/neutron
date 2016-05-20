@@ -20,6 +20,7 @@ import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from neutron.i18n import _, _LE
 from neutron.agent.linux import external_process
 from neutron.agent.linux import utils
 from neutron.common import exceptions
@@ -31,8 +32,7 @@ PRIMARY_VIP_RANGE_SIZE = 24
 # TODO(amuller): Use L3 agent constant when new constants module is introduced.
 FIP_LL_SUBNET = '169.254.30.0/23'
 KEEPALIVED_SERVICE_NAME = 'keepalived'
-GARP_MASTER_REPEAT = 5
-GARP_MASTER_REFRESH = 10
+GARP_MASTER_DELAY = 60
 
 LOG = logging.getLogger(__name__)
 
@@ -114,8 +114,7 @@ class KeepalivedInstance(object):
     def __init__(self, state, interface, vrouter_id, ha_cidrs,
                  priority=HA_DEFAULT_PRIORITY, advert_int=None,
                  mcast_src_ip=None, nopreempt=False,
-                 garp_master_repeat=GARP_MASTER_REPEAT,
-                 garp_master_refresh=GARP_MASTER_REFRESH):
+                 garp_master_delay=GARP_MASTER_DELAY):
         self.name = 'VR_%s' % vrouter_id
 
         if state not in VALID_STATES:
@@ -128,8 +127,7 @@ class KeepalivedInstance(object):
         self.nopreempt = nopreempt
         self.advert_int = advert_int
         self.mcast_src_ip = mcast_src_ip
-        self.garp_master_repeat = garp_master_repeat
-        self.garp_master_refresh = garp_master_refresh
+        self.garp_master_delay = garp_master_delay
         self.track_interfaces = []
         self.vips = []
         self.virtual_routes = []
@@ -225,8 +223,7 @@ class KeepalivedInstance(object):
                   '    interface %s' % self.interface,
                   '    virtual_router_id %s' % self.vrouter_id,
                   '    priority %s' % self.priority,
-                  '    garp_master_repeat %s' % self.garp_master_repeat,
-                  '    garp_master_refresh %s' % self.garp_master_refresh]
+                  '    garp_master_delay %s' % self.garp_master_delay]
 
         if self.nopreempt:
             config.append('    nopreempt')
@@ -324,6 +321,18 @@ class KeepalivedManager(object):
 
         return config_path
 
+    @staticmethod
+    def _safe_remove_pid_file(pid_file):
+        try:
+            os.remove(pid_file)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                LOG.error(_LE("Could not delete file %s, keepalived can "
+                              "refuse to start."), pid_file)
+
+    def get_vrrp_pid_file_name(self, base_pid_file):
+        return '%s-vrrp' % base_pid_file
+
     def get_conf_on_disk(self):
         config_path = self.get_full_config_file_path('keepalived.conf')
         try:
@@ -336,19 +345,18 @@ class KeepalivedManager(object):
     def spawn(self):
         config_path = self._output_config_file()
 
-        def callback(pid_file):
-            cmd = ['keepalived', '-P',
-                   '-f', config_path,
-                   '-p', pid_file,
-                   '-r', '%s-vrrp' % pid_file]
-            return cmd
+        keepalived_pm = self.get_process()
+        vrrp_pm = self._get_vrrp_process(
+            self.get_vrrp_pid_file_name(keepalived_pm.get_pid_file_name()))
 
-        pm = self.get_process(callback=callback)
-        pm.enable(reload_cfg=True)
+        keepalived_pm.default_cmd_callback = (
+            self._get_keepalived_process_callback(vrrp_pm, config_path))
+
+        keepalived_pm.enable(reload_cfg=True)
 
         self.process_monitor.register(uuid=self.resource_id,
                                       service_name=KEEPALIVED_SERVICE_NAME,
-                                      monitored_process=pm)
+                                      monitored_process=keepalived_pm)
 
         LOG.debug('Keepalived spawned with config %s', config_path)
 
@@ -366,3 +374,31 @@ class KeepalivedManager(object):
             self.namespace,
             pids_path=self.conf_path,
             default_cmd_callback=callback)
+
+    def _get_vrrp_process(self, pid_file):
+        return external_process.ProcessManager(
+            cfg.CONF,
+            self.resource_id,
+            self.namespace,
+            pid_file=pid_file)
+
+    def _get_keepalived_process_callback(self, vrrp_pm, config_path):
+
+        def callback(pid_file):
+            # If keepalived process crashed unexpectedly, the vrrp process
+            # will be orphan and prevent keepalived process to be spawned.
+            # A check here will let the l3-agent to kill the orphan process
+            # and spawn keepalived successfully.
+            if vrrp_pm.active:
+                vrrp_pm.disable()
+
+            self._safe_remove_pid_file(pid_file)
+            self._safe_remove_pid_file(self.get_vrrp_pid_file_name(pid_file))
+
+            cmd = ['keepalived', '-P',
+                   '-f', config_path,
+                   '-p', pid_file,
+                   '-r', self.get_vrrp_pid_file_name(pid_file)]
+            return cmd
+
+        return callback

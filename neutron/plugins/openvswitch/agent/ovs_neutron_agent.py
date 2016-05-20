@@ -42,6 +42,7 @@ from neutron.common import utils as q_utils
 from neutron import context
 from neutron.i18n import _LE, _LI, _LW
 from neutron.openstack.common import loopingcall
+from neutron.openstack.common import systemd
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.openvswitch.agent import ovs_dvr_neutron_agent
 from neutron.plugins.openvswitch.common import constants
@@ -209,8 +210,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.bridge_mappings = bridge_mappings
         self.setup_physical_bridges(self.bridge_mappings)
         self.local_vlan_map = {}
-        self.tun_br_ofports = {p_const.TYPE_GRE: {},
-                               p_const.TYPE_VXLAN: {}}
+
+        self._reset_tunnel_ofports()
 
         self.polling_interval = polling_interval
         self.minimize_polling = minimize_polling
@@ -281,9 +282,17 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                         self.agent_state,
                                         self.use_call)
             self.use_call = False
-            self.agent_state.pop('start_flag', None)
+
+            if self.agent_state.pop('start_flag', None):
+                # On initial start, we notify systemd after initialization
+                # is complete.
+                systemd.notify_once()
         except Exception:
             LOG.exception(_LE("Failed reporting state!"))
+
+    def _reset_tunnel_ofports(self):
+        self.tun_br_ofports = {p_const.TYPE_GRE: {},
+                               p_const.TYPE_VXLAN: {}}
 
     def setup_rpc(self):
         self.agent_id = 'ovs-agent-%s' % cfg.CONF.host
@@ -729,25 +738,38 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             if port.ofport != -1:
                 self.int_br.delete_flows(in_port=port.ofport)
 
-    @staticmethod
-    def setup_arp_spoofing_protection(bridge, vif, port_details):
+    @classmethod
+    def setup_arp_spoofing_protection(cls, bridge, vif, port_details):
         # clear any previous flows related to this port in our ARP table
         bridge.delete_flows(table=constants.ARP_SPOOF_TABLE,
                             in_port=vif.ofport)
         if not port_details.get('port_security_enabled', True):
             bridge.delete_flows(table=constants.LOCAL_SWITCHING,
                                 in_port=vif.ofport, proto='arp')
+            cls.set_allowed_macs_for_port(bridge, vif.ofport, allow_all=True)
             LOG.info(_LI("Skipping ARP spoofing rules for port '%s' because "
                          "it has port security disabled"), vif.port_name)
+            return
+        if port_details['device_owner'].startswith('network:'):
+            bridge.delete_flows(table=constants.LOCAL_SWITCHING,
+                                in_port=vif.ofport, proto='arp')
+            cls.set_allowed_macs_for_port(bridge, vif.ofport, allow_all=True)
+            LOG.debug("Skipping ARP spoofing rules for network owned port "
+                      "'%s'.", vif.port_name)
             return
         # all of the rules here are based on 'in_port' match criteria
         # so their cleanup will be handled by 'update_stale_ofport_rules'
 
         # collect all of the addresses and cidrs that belong to the port
         addresses = [f['ip_address'] for f in port_details['fixed_ips']]
+        mac_addresses = {vif.vif_mac}
         if port_details.get('allowed_address_pairs'):
             addresses += [p['ip_address']
                           for p in port_details['allowed_address_pairs']]
+            mac_addresses |= {p['mac_address']
+                              for p in port_details['allowed_address_pairs']}
+
+        cls.set_allowed_macs_for_port(bridge, vif.ofport, mac_addresses)
         if any(netaddr.IPNetwork(ip).prefixlen == 0 for ip in addresses):
             # don't try to install protection because a /0 prefix allows any
             # address anyway and the ARP_SPA can only match on /1 or more.
@@ -760,9 +782,13 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         for ip in addresses:
             if netaddr.IPNetwork(ip).version != 4:
                 continue
+            if cfg.CONF.AGENT.enable_mac_spoofing_protection:
+                action = "resubmit(,%s)" % constants.MAC_SPOOF_TABLE
+            else:
+                action = "NORMAL"
             bridge.add_flow(table=constants.ARP_SPOOF_TABLE, priority=2,
                             proto='arp', arp_spa=ip, in_port=vif.ofport,
-                            actions="NORMAL")
+                            actions=action)
 
         # drop any ARPs in this table that aren't explicitly allowed
         bridge.add_flow(table=constants.ARP_SPOOF_TABLE, priority=1,
@@ -775,6 +801,34 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         bridge.add_flow(table=constants.LOCAL_SWITCHING,
                         priority=10, proto='arp', in_port=vif.ofport,
                         actions=("resubmit(,%s)" % constants.ARP_SPOOF_TABLE))
+
+    @staticmethod
+    def set_allowed_macs_for_port(br, port, mac_addresses=None,
+                                  allow_all=False):
+        if not cfg.CONF.AGENT.enable_mac_spoofing_protection:
+            return
+        if allow_all:
+            br.delete_flows(table=constants.LOCAL_SWITCHING, in_port=port)
+            br.delete_flows(table=constants.MAC_SPOOF_TABLE, in_port=port)
+            return
+        mac_addresses = mac_addresses or []
+        for address in mac_addresses:
+            br.add_flow(table=constants.MAC_SPOOF_TABLE, priority=2,
+                        eth_src=address, in_port=port,
+                        actions="NORMAL")
+        # normalize so we can see if macs are the same
+        mac_addresses = {netaddr.EUI(mac) for mac in mac_addresses}
+        flows = br.dump_flows_for_table(constants.MAC_SPOOF_TABLE).splitlines()
+        for flow in flows:
+            if 'dl_src' not in flow or 'in_port=%s' % port not in flow:
+                continue
+            flow_mac = flow.split('dl_src=')[1].split(' ')[0].split(',')[0]
+            if netaddr.EUI(flow_mac) not in mac_addresses:
+                br.delete_flows(table=constants.MAC_SPOOF_TABLE,
+                                in_port=port, eth_src=flow_mac)
+        br.add_flow(table=constants.LOCAL_SWITCHING,
+                    priority=9, in_port=port,
+                    actions=("resubmit(,%s)" % constants.MAC_SPOOF_TABLE))
 
     def port_unbound(self, vif_id, net_uuid=None):
         '''Unbind port.
@@ -1188,6 +1242,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                 physical_network, segmentation_id,
                                 fixed_ips, device_owner, ovs_restarted)
             else:
+                LOG.info(_LI("VIF port: %s admin state up disabled, "
+                             "putting on the dead VLAN"), vif_port.vif_id)
+
                 self.port_dead(vif_port)
         else:
             LOG.debug("No VIF port for port %s defined on agent.", port_id)
@@ -1561,6 +1618,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 self.setup_physical_bridges(self.bridge_mappings)
                 if self.enable_tunneling:
                     self.reset_tunnel_br()
+                    self._reset_tunnel_ofports()
                     self.setup_tunnel_br()
                     tunnel_sync = True
                 if self.enable_distributed_routing:
@@ -1738,6 +1796,7 @@ def create_agent_config_map(config):
 def main():
     cfg.CONF.register_opts(ip_lib.OPTS)
     config.register_root_helper(cfg.CONF)
+    config.register_spoofing_opts(cfg.CONF)
     common_config.init(sys.argv[1:])
     common_config.setup_logging()
     q_utils.log_opt_values(LOG)

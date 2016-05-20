@@ -18,6 +18,7 @@ from oslo_config import cfg
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.api.v2 import attributes
 from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
@@ -105,6 +106,7 @@ class L3HATestFramework(testlib_api.SqlTestCase):
 
 
 class L3HATestCase(L3HATestFramework):
+
     def test_verify_configuration_succeed(self):
         # Default configuration should pass
         self.plugin._verify_configuration()
@@ -187,6 +189,21 @@ class L3HATestCase(L3HATestFramework):
         bindings = self.plugin.get_l3_bindings_hosting_router_with_ha_states(
             self.admin_ctx, router['id'])
         self.assertEqual([], bindings)
+
+    def test_get_l3_bindings_hosting_router_with_ha_states_active_and_dead(
+            self):
+        router = self._create_router()
+        self._bind_router(router['id'])
+        with mock.patch.object(agents_db.Agent, 'is_active',
+                               new_callable=mock.PropertyMock,
+                               return_value=False):
+            self.plugin.update_routers_states(
+                self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
+            bindings = (
+                self.plugin.get_l3_bindings_hosting_router_with_ha_states(
+                    self.admin_ctx, router['id']))
+            agent_ids = [(agent[0]['id'], agent[1]) for agent in bindings]
+            self.assertIn((self.agent1['id'], 'standby'), agent_ids)
 
     def test_ha_router_create(self):
         router = self._create_router()
@@ -301,6 +318,31 @@ class L3HATestCase(L3HATestFramework):
         self._create_router()
         self.assertTrue(self.notif_m.called)
 
+    def test_allocating_router_hidden_from_sync(self):
+        self.plugin.supported_extension_aliases = [
+            constants.L3_HA_MODE_EXT_ALIAS]
+        # simulate a router that is being allocated during
+        # the agent's synchronization
+        r1, r2 = self._create_router(), self._create_router()
+        self.plugin._delete_ha_interfaces(self.admin_ctx, r1['id'])
+        # store shorter name for readability
+        get_method = self.plugin._get_active_l3_agent_routers_sync_data
+        # r1 should be hidden
+        self.assertEqual([r2['id']],
+                         [r['id'] for r in get_method(self.admin_ctx,
+                                                      None, self.agent1,
+                                                      [r1['id'], r2['id']])])
+        # but once it transitions back, all is well in the world again!
+        rdb = self.plugin._get_router(self.admin_ctx, r1['id'])
+        self.plugin._create_ha_interfaces(
+            self.admin_ctx, rdb, self.plugin.get_ha_network(
+                self.admin_ctx, rdb.tenant_id))
+        # just compare ids since python3 won't let us sort dicts
+        expected = sorted([r1['id'], r2['id']])
+        result = sorted([r['id'] for r in get_method(
+              self.admin_ctx, None, self.agent1, [r1['id'], r2['id']])])
+        self.assertEqual(expected, result)
+
     def test_update_router_to_ha_notifies_agent(self):
         router = self._create_router(ha=False)
         self.notif_m.reset_mock()
@@ -387,7 +429,7 @@ class L3HATestCase(L3HATestFramework):
         network = self.plugin.get_ha_network(self.admin_ctx,
                                              router['tenant_id'])
 
-        with mock.patch.object(self.plugin, '_create_ha_port_binding',
+        with mock.patch.object(l3_hamode_db, 'L3HARouterAgentPortBinding',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin.add_ha_port,
                               self.admin_ctx, router['id'], network.network_id,
@@ -401,8 +443,8 @@ class L3HATestCase(L3HATestFramework):
     def test_create_ha_network_binding_failure_rolls_back_network(self):
         networks_before = self.core_plugin.get_networks(self.admin_ctx)
 
-        with mock.patch.object(self.plugin,
-                               '_create_ha_network_tenant_binding',
+        with mock.patch.object(l3_hamode_db,
+                               'L3HARouterNetwork',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin._create_ha_network,
                               self.admin_ctx, _uuid())
@@ -414,9 +456,10 @@ class L3HATestCase(L3HATestFramework):
         networks_before = self.core_plugin.get_networks(self.admin_ctx)
 
         with mock.patch.object(self.plugin, '_create_ha_subnet',
-                               side_effect=ValueError):
-            self.assertRaises(ValueError, self.plugin._create_ha_network,
-                              self.admin_ctx, _uuid())
+                               side_effect=ValueError),\
+            self.admin_ctx._session.begin():
+                self.assertRaises(ValueError, self.plugin._create_ha_network,
+                                  self.admin_ctx, _uuid())
 
         networks_after = self.core_plugin.get_networks(self.admin_ctx)
         self.assertEqual(networks_before, networks_after)
@@ -430,7 +473,7 @@ class L3HATestCase(L3HATestFramework):
             self.admin_ctx, filters=device_filter)
 
         router_db = self.plugin._get_router(self.admin_ctx, router['id'])
-        with mock.patch.object(self.plugin, '_create_ha_port_binding',
+        with mock.patch.object(l3_hamode_db, 'L3HARouterAgentPortBinding',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin._create_ha_interfaces,
                               self.admin_ctx, router_db, network)
@@ -503,6 +546,19 @@ class L3HATestCase(L3HATestFramework):
                                                         self.agent1['host'])
         self.assertEqual('active', routers[0][constants.HA_ROUTER_STATE_KEY])
 
+    def test_update_routers_states_port_not_found(self):
+        router1 = self._create_router()
+        self._bind_router(router1['id'])
+        port = {'id': 'foo', 'device_id': router1['id']}
+        with mock.patch.object(self.core_plugin, 'get_ports',
+                               return_value=[port]):
+            with mock.patch.object(
+                    self.core_plugin, 'update_port',
+                    side_effect=n_exc.PortNotFound(port_id='foo')):
+                states = {router1['id']: 'active'}
+                self.plugin.update_routers_states(
+                    self.admin_ctx, states, self.agent1['host'])
+
     def test_exclude_dvr_agents_for_ha_candidates(self):
         """Test dvr agents are not counted in the ha candidates.
 
@@ -523,6 +579,17 @@ class L3HATestCase(L3HATestFramework):
         num_ha_candidates = self.plugin.get_number_of_agents_for_scheduling(
             self.admin_ctx)
         self.assertEqual(2, num_ha_candidates)
+
+    def test_update_port_status_port_bingding_deleted_concurrently(self):
+        router1 = self._create_router()
+        self._bind_router(router1['id'])
+        states = {router1['id']: 'active'}
+        with mock.patch.object(self.plugin, 'get_ha_router_port_bindings'):
+            (self.admin_ctx.session.query(
+                 l3_hamode_db.L3HARouterAgentPortBinding).
+             filter_by(router_id=router1['id']).delete())
+            self.plugin.update_routers_states(
+                self.admin_ctx, states, self.agent1['host'])
 
 
 class L3HAModeDbTestCase(L3HATestFramework):
