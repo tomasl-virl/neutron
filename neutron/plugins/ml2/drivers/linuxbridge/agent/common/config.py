@@ -81,7 +81,16 @@ qos_options = [
                       "information."))
 ]
 
+extra_opts = [
+    cfg.IntOpt('network_device_mtu',
+               help=_("MTU used for VIFs")),
+    cfg.IntOpt('network_bridge_ageing', default=None,
+               help=_("Bridge MAC learning timeout (0 = disable)")),
+    cfg.IntOpt('network_bridge_multicast_snooping', default=None,
+               help=_("Bridge multicast snooping (0 = disable)")),
+]
 
 cfg.CONF.register_opts(vxlan_opts, "VXLAN")
 cfg.CONF.register_opts(bridge_opts, "LINUX_BRIDGE")
+cfg.CONF.register_opts(extra_opts)
 cfg.CONF.register_opts(qos_options, "QOS")

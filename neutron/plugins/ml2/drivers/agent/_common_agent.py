@@ -200,6 +200,10 @@ class CommonAgentLoop(service.Service):
 
         if device_info.get('removed'):
             resync_b = self.treat_devices_removed(device_info['removed'])
+
+        self.treat_devices_faked(device_info.get('faked'))
+        self.mgr.prune_known_bridges()
+
         # If one of the above operations fails => resync with plugin
         return (resync_a | resync_b)
 
@@ -272,8 +276,9 @@ class CommonAgentLoop(service.Service):
                 #    the old implementation. See Bug #1312016
                 # 2) The new code is much more readable
                 if interface_plugged:
-                    self.mgr.ensure_port_admin_state(
-                        device, device_details['admin_state_up'])
+                    self.mgr.update_device_link(device_details)
+                    #self.mgr.ensure_port_admin_state(
+                    #    device, device_details['admin_state_up'])
                 # update plugin about port status if admin_state is up
                 if device_details['admin_state_up']:
                     if interface_plugged:
@@ -333,10 +338,29 @@ class CommonAgentLoop(service.Service):
                 if previous_timestamps.get(device) and
                 timestamp != previous_timestamps.get(device)}
 
+    def treat_devices_faked(self, devices):
+        """Handle devices that aren't really on this host, but are attached"""
+        if not devices:
+            return
+        for port in devices:
+            device = self.mgr.get_tap_device_name(port['id'])
+
+            if port['device_id']:
+                self.plugin_rpc.update_device_up(self.context,
+                                                 device,
+                                                 self.agent_id,
+                                                 cfg.CONF.host)
+            else:
+                self.plugin_rpc.update_device_down(self.context,
+                                                   device,
+                                                   self.agent_id,
+                                                   cfg.CONF.host)
+
     def scan_devices(self, previous, sync):
         device_info = {}
 
         updated_devices = self.rpc_callbacks.get_and_clear_updated_devices()
+        device_info['faked'] = self.rpc_callbacks.get_and_clear_faked_devices()
 
         current_devices = self.mgr.get_all_devices()
         device_info['current'] = current_devices
@@ -391,6 +415,7 @@ class CommonAgentLoop(service.Service):
     def _device_info_has_changes(self, device_info):
         return (device_info.get('added')
                 or device_info.get('updated')
+                or device_info.get('faked')
                 or device_info.get('removed'))
 
     def daemon_loop(self):

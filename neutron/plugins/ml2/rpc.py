@@ -88,7 +88,10 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
             if port['network_id'] not in cached_networks:
                 cached_networks[port['network_id']] = (
                     port_context.network.current)
-
+        if not segment and (port['device_id'] or '').startswith('virl-'):
+            network = port_context.network.current
+            segment = {key: network['provider:' + key] for key in
+                (api.NETWORK_TYPE, api.SEGMENTATION_ID, api.PHYSICAL_NETWORK)}
         if not segment:
             LOG.warning(_LW("Device %(device)s requested by agent "
                             "%(agent_id)s on network %(network_id)s not "
@@ -121,6 +124,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                  'physical_network': segment[api.PHYSICAL_NETWORK],
                  'fixed_ips': port['fixed_ips'],
                  'device_owner': port['device_owner'],
+                 'device_id': port['device_id'],
                  'allowed_address_pairs': port['allowed_address_pairs'],
                  'port_security_enabled': port.get(psec.PORTSECURITY, True),
                  'qos_policy_id': port.get(qos_consts.QOS_POLICY_ID),
@@ -306,12 +310,12 @@ class AgentNotifierApi(dvr_rpc.DVRAgentRpcApiMixin,
         cctxt.cast(context, 'network_delete', network_id=network_id)
 
     def port_update(self, context, port, network_type, segmentation_id,
-                    physical_network):
+                    physical_network, faked=None):
         cctxt = self.client.prepare(topic=self.topic_port_update,
                                     fanout=True)
         cctxt.cast(context, 'port_update', port=port,
                    network_type=network_type, segmentation_id=segmentation_id,
-                   physical_network=physical_network)
+                   physical_network=physical_network, faked=faked)
 
     def port_delete(self, context, port_id):
         cctxt = self.client.prepare(topic=self.topic_port_delete,

@@ -44,6 +44,7 @@ SYS_NET_PATH = '/sys/class/net'
 DEFAULT_GW_PATTERN = re.compile(r"via (\S+)")
 METRIC_PATTERN = re.compile(r"metric (\S+)")
 DEVICE_NAME_PATTERN = re.compile(r"(\d+?): (\S+?):.*")
+BRIDGE_PATH_FOR_DEVICE = SYS_NET_PATH + '/%s/brport/bridge'
 
 
 def remove_interface_suffix(interface):
@@ -221,8 +222,11 @@ class IPWrapper(SubProcessBase):
         return IPDevice(name, namespace=self.namespace)
 
     def add_vxlan(self, name, vni, group=None, dev=None, ttl=None, tos=None,
-                  local=None, port=None, proxy=False):
-        cmd = ['add', name, 'type', 'vxlan', 'id', vni]
+                  local=None, port=None, mtu=None, proxy=False):
+        cmd = ['add', name]
+        if mtu:
+            cmd.extend(['mtu', mtu])
+        cmd.extend(['type', 'vxlan', 'id', vni])
         if group:
             cmd.extend(['group', group])
         if dev:
@@ -267,6 +271,9 @@ class IPDevice(SubProcessBase):
 
     def exists(self):
         """Return True if the device exists in the namespace."""
+        if not self.namespace:
+            # Quicker (no subprocess), unlikely that a device wouldn't have a MAC
+            return os.path.exists(os.path.join(SYS_NET_PATH, self.name))
         # we must save and restore this before returning
         orig_log_fail_as_error = self.get_log_fail_as_error()
         self.set_log_fail_as_error(False)
@@ -519,6 +526,31 @@ class IpLinkCommand(IpDeviceCommandBase):
 
     def delete(self):
         self._as_root([], ('delete', self.name))
+
+    def set_master(self, master, mtu_size=None, down=None):
+        command = ['set', self.name]
+        if self.master != master:
+            if master is None:
+                command.append('nomaster')
+            else:
+                command.append('master')
+                command.append(master)
+        if mtu_size is not None:
+            command.append('mtu')
+            command.append(mtu_size)
+        if down is not None:
+            command.append('down' if down else 'up')
+        if len(command) > 2:
+            return self._as_root([], tuple(command))
+
+    @property
+    def master(self):
+        try:
+            path = os.readlink(BRIDGE_PATH_FOR_DEVICE % self.name)
+        except OSError:
+            return None
+        else:
+            return path.rpartition('/')[-1]
 
     @property
     def address(self):
@@ -954,6 +986,9 @@ def vxlan_in_use(segmentation_id, namespace=None):
 
 def device_exists(device_name, namespace=None):
     """Return True if the device exists in the namespace."""
+    if not namespace:
+        # Quicker (no subprocess), unlikely that a device wouldn't have a MAC
+        return os.path.exists(os.path.join(SYS_NET_PATH, device_name))
     return IPDevice(device_name, namespace=namespace).exists()
 
 

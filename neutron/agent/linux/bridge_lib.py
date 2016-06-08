@@ -20,6 +20,7 @@ import os
 
 from oslo_log import log as logging
 
+from neutron.agent.common import utils
 from neutron.agent.linux import ip_lib
 
 LOG = logging.getLogger(__name__)
@@ -31,6 +32,14 @@ BRIDGE_INTERFACE_FS = BRIDGE_FS + "%(bridge)s/brif/%(interface)s"
 BRIDGE_INTERFACES_FS = BRIDGE_FS + "%s/brif/"
 BRIDGE_PORT_FS_FOR_DEVICE = BRIDGE_FS + "%s/brport"
 BRIDGE_PATH_FOR_DEVICE = BRIDGE_PORT_FS_FOR_DEVICE + '/bridge'
+# Bridge ageing control
+BRIDGE_AGEING_FS = BRIDGE_FS + "%s/bridge/ageing_time"
+# Bridge multicast snooping control
+BRIDGE_SNOOPING_FS = BRIDGE_FS + "%s/bridge/multicast_snooping"
+# Allow forwarding of all 802.1d reserved frames but 0 and disallowed STP, LLDP
+BRIDGE_FWD_MASK_FS = BRIDGE_FS + "%s/bridge/group_fwd_mask"
+BRIDGE_FWD_MASK = hex(0xffff ^ (1 << 0x0 | 1 << 0x1 | 1 << 0x2 | 1 << 0xe))
+BRIDGE_FWD_MASK_ALL = hex(0xffff)
 
 
 def is_bridged_interface(interface):
@@ -57,6 +66,11 @@ class BridgeDevice(ip_lib.IPDevice):
         ip_wrapper = ip_lib.IPWrapper(self.namespace)
         return ip_wrapper.netns.execute(cmd, run_as_root=True)
 
+    def _tee(self, path, inputs):
+        cmd = ['tee', path % self.name]
+        return utils.execute(cmd, process_input=str(inputs), run_as_root=True,
+                             log_fail_as_error=self.log_fail_as_error)
+
     @classmethod
     def addbr(cls, name, namespace=None):
         bridge = cls(name, namespace)
@@ -65,13 +79,20 @@ class BridgeDevice(ip_lib.IPDevice):
 
     @classmethod
     def get_interface_bridge(cls, interface):
+        name = cls.get_interface_bridge_name(interface)
+        if name is None:
+            return None
+        return cls(name)
+
+    @staticmethod
+    def get_interface_bridge_name(interface):
         try:
             path = os.readlink(BRIDGE_PATH_FOR_DEVICE % interface)
         except OSError:
             return None
         else:
             name = path.rpartition('/')[-1]
-            return cls(name)
+            return name
 
     def delbr(self):
         return self._brctl(['delbr', self.name])
@@ -98,3 +119,32 @@ class BridgeDevice(ip_lib.IPDevice):
             return os.listdir(BRIDGE_INTERFACES_FS % self.name)
         except OSError:
             return []
+
+    def set_group_fwd_mask(self, mask=BRIDGE_FWD_MASK_ALL):
+        try:
+            self._tee(BRIDGE_FWD_MASK_FS, mask)
+        except RuntimeError:
+            if mask == BRIDGE_FWD_MASK_ALL:
+                LOG.warning('Cannot unmask all mcast forwarding on bridge %s; '
+                            'some frames (LACP, LLDP) will be dropped by it',
+                            self.name)
+                self.set_group_fwd_mask(mask=BRIDGE_FWD_MASK)
+            else:
+                LOG.error('Cannot unmask any mcast forwarding on bridge %s',
+                          self.name)
+
+    def set_ageing(self, ageing):
+        if ageing is None:
+            return
+        try:
+            self._tee(BRIDGE_AGEING_FS, ageing)
+        except RuntimeError:
+            LOG.error('Cannot set ageing on bridge %s', self.name)
+
+    def set_multicast_snooping(self, snooping):
+        if snooping is None:
+            return
+        try:
+            self._tee(BRIDGE_SNOOPING_FS, snooping)
+        except RuntimeError:
+            LOG.error('Cannot set snooping on bridge %s', self.name)

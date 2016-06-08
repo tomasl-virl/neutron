@@ -585,9 +585,26 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         None,
         '_ml2_port_result_filter_hook')
 
+    def _detect_faked_port(self, mech_context):
+        port = mech_context.current
+        host = port.get('binding:host_id')
+        owner = port.get('device_owner')
+        port = mech_context._original_port
+        if port:
+            if not host:
+                host = port.get('binding:host_id')
+            if not owner:
+                owner = port.get('device_owner')
+        return host if owner == 'virl:coreos' else None
+
     def _notify_port_updated(self, mech_context):
         port = mech_context.current
         segment = mech_context.bottom_bound_segment
+        faked = self._detect_faked_port(mech_context)
+        if faked:
+            self.notifier.port_update(mech_context._plugin_context, port,
+                                      None, None, None, faked)
+            return
         if not segment:
             # REVISIT(rkukura): This should notify agent to unplug port
             network = mech_context.network.current
@@ -1128,7 +1145,57 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         return bound_context.current
 
     def create_port_bulk(self, context, ports):
+        # Create ports which request fixed_ips first, to avoid conflicts
+        # with automatically assigned addresses from the pool
+        fixed_ports = list()
+        blank_ports = list()
+        fixed_indices = list()
+        for index, port in enumerate(ports['ports']):
+            fixed = port['port'].get('fixed_ips')
+            if fixed in (None, attributes.ATTR_NOT_SPECIFIED):
+                fixed = None
+            else:
+                for obj in fixed:
+                    if obj.get('ip_address'):
+                        break
+                else:
+                    fixed = None
+            if fixed:
+                fixed_ports.append(port)
+                fixed_indices.append(index)
+            else:
+                blank_ports.append(port)
+
+        if fixed_ports and blank_ports:
+            ports['ports'] = fixed_ports + blank_ports
+        else:
+            fixed_indices = None
+
         objects = self._create_bulk_ml2(attributes.PORT, context, ports)
+
+        # Recreate the original order of created objects
+        if fixed_indices:
+            reordered = [None] * len(objects)
+            fixed_iter = iter(fixed_indices)
+            fixed = next(fixed_iter)
+            blank = 0
+            for obj in objects:
+                # Fill in fixed ports while indices are not exhausted
+                if fixed is not None:
+                    reordered[fixed] = obj
+                    try:
+                        fixed = next(fixed_iter)
+                    except StopIteration:
+                        fixed = None
+                    continue
+
+                # Fill in blank spots for the rest
+                while reordered[blank] is not None:
+                    blank += 1
+                reordered[blank] = obj
+                blank += 1
+
+            objects = reordered
 
         # REVISIT(rkukura): Is there any point in calling this before
         # a binding has been successfully established?
@@ -1218,6 +1285,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self._portsec_ext_port_update_processing(updated_port, context,
                                                      port, id)
 
+            if original_port['device_id'] != updated_port['device_id']:
+                need_port_update_notify = True
             if (psec.PORTSECURITY in attrs) and (
                         original_port[psec.PORTSECURITY] !=
                         updated_port[psec.PORTSECURITY]):
