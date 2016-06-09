@@ -40,6 +40,7 @@ OPTS = [
 
 LOOPBACK_DEVNAME = 'lo'
 
+IP_NETNS_PATH = '/var/run/netns'
 SYS_NET_PATH = '/sys/class/net'
 DEFAULT_GW_PATTERN = re.compile(r"via (\S+)")
 METRIC_PATTERN = re.compile(r"metric (\S+)")
@@ -249,7 +250,10 @@ class IPWrapper(SubProcessBase):
 
     @classmethod
     def get_namespaces(cls):
-        output = cls._execute([], 'netns', ('list',))
+        if not cfg.CONF.AGENT.use_helper_for_ns_read:
+            return os.listdir(IP_NETNS_PATH)
+
+        output = cls._execute([], 'netns', ['list'], run_as_root=True)
         return [l.split()[0] for l in output.splitlines()]
 
 
@@ -596,12 +600,12 @@ class IpLinkCommand(IpDeviceCommandBase):
 class IpAddrCommand(IpDeviceCommandBase):
     COMMAND = 'addr'
 
-    def add(self, cidr, scope='global', add_broadcast=True):
+    def add(self, cidr, scope='global'):
         net = netaddr.IPNetwork(cidr)
         args = ['add', cidr,
                 'scope', scope,
                 'dev', self.name]
-        if add_broadcast and net.version == 4:
+        if net.version == 4:
             args += ['brd', str(net[-1])]
         self._as_root([net.version], tuple(args))
 
@@ -959,9 +963,11 @@ class IpNetnsCommand(IpCommandBase):
                              log_fail_as_error=log_fail_as_error, **kwargs)
 
     def exists(self, name):
+        if not cfg.CONF.AGENT.use_helper_for_ns_read:
+            return os.path.exists(os.path.join(IP_NETNS_PATH, name))
+
         output = self._parent._execute(
-            ['o'], 'netns', ['list'],
-            run_as_root=cfg.CONF.AGENT.use_helper_for_ns_read)
+            ['o'], 'netns', ['list'], run_as_root=True)
         for line in [l.split()[0] for l in output.splitlines()]:
             if name == line:
                 return True
