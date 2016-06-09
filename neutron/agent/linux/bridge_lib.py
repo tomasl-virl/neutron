@@ -133,9 +133,11 @@ class BridgeDevice(ip_lib.IPDevice):
                 LOG.error('Cannot unmask any mcast forwarding on bridge %s',
                           self.name)
 
-    def set_ageing(self, ageing):
+    def set_ageing(self, ageing, physical_ageing, physical):
         if ageing is None:
             return
+        if physical and not physical_ageing:
+            ageing = 0
         try:
             self._tee(BRIDGE_AGEING_FS, ageing)
         except RuntimeError:

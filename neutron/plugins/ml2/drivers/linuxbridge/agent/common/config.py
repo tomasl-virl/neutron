@@ -86,6 +86,8 @@ extra_opts = [
                help=_("MTU used for VIFs")),
     cfg.IntOpt('network_bridge_ageing', default=None,
                help=_("Bridge MAC learning timeout (0 = disable)")),
+    cfg.BoolOpt('network_physical_ageing', default=False,
+               help=_("Bridge MAC learning controls physical networks too")),
     cfg.IntOpt('network_bridge_multicast_snooping', default=None,
                help=_("Bridge multicast snooping (0 = disable)")),
 ]

@@ -188,11 +188,12 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         """Create a vlan and bridge unless they already exist."""
         interface = self.ensure_vlan(physical_interface, vlan_id)
         if phy_bridge_name:
-            return self.ensure_bridge(phy_bridge_name)
+            return self.ensure_bridge(phy_bridge_name, physical=True)
         else:
             bridge_name = self.get_bridge_name(network_id)
             ips, gateway = self.get_interface_details(interface)
-            if self.ensure_bridge(bridge_name, interface, ips, gateway):
+            if self.ensure_bridge(bridge_name, interface, ips, gateway,
+                                  physical=True):
                 return interface
 
     def ensure_vxlan_bridge(self, network_id, segmentation_id):
@@ -219,12 +220,12 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                            physical_interface):
         """Create a non-vlan bridge unless it already exists."""
         if phy_bridge_name:
-            return self.ensure_bridge(phy_bridge_name)
+            return self.ensure_bridge(phy_bridge_name, physical=True)
         else:
             bridge_name = self.get_bridge_name(network_id)
             ips, gateway = self.get_interface_details(physical_interface)
             if self.ensure_bridge(bridge_name, physical_interface, ips,
-                                  gateway):
+                                  gateway, physical=True):
                 return physical_interface
 
     def ensure_local_bridge(self, network_id, phy_bridge_name):
@@ -343,7 +344,7 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         return True
 
     def ensure_bridge(self, bridge_name, interface=None, ips=None,
-                      gateway=None):
+                      gateway=None, physical=False):
         """Create a bridge unless it already exists."""
         # _bridge_exists_and_ensure_up instead of device_exists is used here
         # because there are cases where the bridge exists but it's not UP,
@@ -372,7 +373,9 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
         if bridge_name not in self.known_bridges:
             bridge_device.set_group_fwd_mask()
-            bridge_device.set_ageing(cfg.CONF.network_bridge_ageing)
+            bridge_device.set_ageing(cfg.CONF.network_bridge_ageing,
+                                     cfg.CONG.network_physical_ageing,
+                                     physical)
             bridge_device.set_multicast_snooping(cfg.CONF.network_bridge_multicast_snooping)
             bridge_device.disable_stp()
             self.known_bridges.add(bridge_name)
