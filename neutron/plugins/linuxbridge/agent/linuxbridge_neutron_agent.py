@@ -181,7 +181,7 @@ class LinuxBridgeManager(object):
         interface = self.ensure_vlan(physical_interface, vlan_id)
         bridge_name = self.get_bridge_name(network_id)
         ips, gateway = self.get_interface_details(interface)
-        if self.ensure_bridge(bridge_name, interface, ips, gateway):
+        if self.ensure_bridge(bridge_name, interface, ips, gateway, True):
             return interface
 
     def ensure_vxlan_bridge(self, network_id, segmentation_id):
@@ -208,7 +208,7 @@ class LinuxBridgeManager(object):
         """Create a non-vlan bridge unless it already exists."""
         bridge_name = self.get_bridge_name(network_id)
         ips, gateway = self.get_interface_details(physical_interface)
-        if self.ensure_bridge(bridge_name, physical_interface, ips, gateway):
+        if self.ensure_bridge(bridge_name, physical_interface, ips, gateway, True):
             return physical_interface
 
     def ensure_local_bridge(self, network_id):
@@ -312,7 +312,7 @@ class LinuxBridgeManager(object):
         return True
 
     def ensure_bridge(self, bridge_name, interface=None, ips=None,
-                      gateway=None):
+                      gateway=None, physical=False):
         """Create a bridge unless it already exists."""
         # _bridge_exists_and_ensure_up instead of device_exists is used here
         # because there are cases where the bridge exists but it's not UP,
@@ -341,7 +341,7 @@ class LinuxBridgeManager(object):
 
         if bridge_name not in self.known_bridges:
             self.set_bridge_group_fwd_mask(bridge_name)
-            self.set_bridge_ageing(bridge_name)
+            self.set_bridge_ageing(bridge_name, physical)
             self.set_bridge_multicast_snooping(bridge_name)
             if utils.execute(['brctl', 'stp', bridge_name,
                               'off'], run_as_root=True):
@@ -589,15 +589,18 @@ class LinuxBridgeManager(object):
                 LOG.error('Cannot unmask any mcast forwarding on bridge %s',
                           bridge_name)
 
-    def set_bridge_ageing(self, bridge_name):
+    def set_bridge_ageing(self, bridge_name, physical):
         """Set bridge ageing to control MAC learning"""
-        if cfg.CONF.network_bridge_ageing is None:
+        ageing = cfg.CONF.network_bridge_ageing
+        if ageing is None:
             return
+        if physical and not cfg.CONF.network_physical_ageing:
+            ageing = 0
         bridge_ageing_path = BRIDGE_AGEING_FS.replace(
                                BRIDGE_NAME_PLACEHOLDER, bridge_name)
         try:
             utils.execute(['tee', bridge_ageing_path],
-                          process_input=str(cfg.CONF.network_bridge_ageing),
+                          process_input=str(ageing),
                           run_as_root=True)
         except RuntimeError:
                 LOG.error('Cannot set ageing on bridge %s', bridge_name)
