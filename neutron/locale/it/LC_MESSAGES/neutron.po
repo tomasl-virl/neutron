@@ -3,21 +3,17 @@
 # This file is distributed under the same license as the neutron project.
 #
 # Translators:
-# OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Tom Cocozzello <tjcocozz@us.ibm.com>, 2015. #zanata
-# Alessandra <alessandra@translated.net>, 2016. #zanata
 # Remo Mattei <remo@rm.ht>, 2016. #zanata
-# Tom Cocozzello <tjcocozz@us.ibm.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 8.0.1.dev68\n"
+"Project-Id-Version: neutron 8.2.1.dev52\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2016-04-18 20:06+0000\n"
+"POT-Creation-Date: 2016-09-01 18:10+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-04-13 09:48+0000\n"
-"Last-Translator: Alessandra <alessandra@translated.net>\n"
+"PO-Revision-Date: 2016-04-22 03:55+0000\n"
+"Last-Translator: Andreas Jaeger <jaegerandi@gmail.com>\n"
 "Language: it\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "Generated-By: Babel 2.0\n"
@@ -341,16 +337,6 @@ msgid ""
 msgstr ""
 "Un pool di sottorete predefinito per questa famiglia IP è già stato "
 "impostato. Solo un valore predefinito può esistere per famiglia IP"
-
-msgid ""
-"A list of mappings of physical networks to MTU values. The format of the "
-"mapping is <physnet>:<mtu val>. This mapping allows specifying a physical "
-"network MTU value that differs from the default segment_mtu value."
-msgstr ""
-"Un elenco di associazioni di reti fisiche ai valori MTU. Il formato "
-"dell'associazione è <physnet>:<mtu val>. Questa associazione consente di "
-"specificare un valore MTU di rete fisica che differisce dal valore "
-"segment_mtu predefinito."
 
 msgid "A metering driver must be specified"
 msgstr "Specificare un driver di misurazione"
@@ -2277,9 +2263,6 @@ msgstr ""
 msgid "Local IP address of the VXLAN endpoints."
 msgstr "Indirizzo IP locale degli endpoint VXLAN."
 
-msgid "Local IP address of tunnel endpoint."
-msgstr "Indirizzo IP locale dell'endpoint tunnel."
-
 msgid "Location for Metadata Proxy UNIX domain socket."
 msgstr "Ubicazione per il socket del dominio UNIX del proxy di metadati."
 
@@ -2310,29 +2293,6 @@ msgstr "Registra gli heartbeat dell'agent"
 
 msgid "Loopback IP subnet is not supported if enable_dhcp is True."
 msgstr "La sottorete IP Loopback non è supportata se enable_dhcp è True."
-
-msgid ""
-"MTU of the underlying physical network. Neutron uses this value to calculate "
-"MTU for all virtual network components. For flat and VLAN networks, neutron "
-"uses this value without modification. For overlay networks such as VXLAN, "
-"neutron automatically subtracts the overlay protocol overhead from this "
-"value. Defaults to 1500, the standard value for Ethernet."
-msgstr ""
-"MTU della rete fisica sottostante. Neutron utilizza questo valore per "
-"calcolare la MTU per tutti i componenti della rete virtuale. Per le reti "
-"flat e VLAN,  neutron utilizza questo valore senza modifica. Per le reti di "
-"sovrapposizione come VXLAN, neutron sottrae automaticamente l'overhead del "
-"protocollo di sovrapposizione  da questo valore. Il valore predefinito è "
-"impostato su 1500, il valore standard per Ethernet."
-
-msgid ""
-"MTU setting for device. This option will be removed in Newton. Please use "
-"the system-wide segment_mtu setting which the agents will take into account "
-"when wiring VIFs."
-msgstr ""
-"L'impostazione MTU per il dispositivo. Questa opzione verrà rimossa in "
-"Newton. Utilizzare l'impostazione segment_mtu a livello di sistema che gli "
-"agent considerano quando scrivono i VIF."
 
 msgid "MTU size of veth interfaces"
 msgstr "Dimensione MTU delle interfacce veth"
@@ -2375,27 +2335,6 @@ msgstr "Numero massimo di route host per la sottorete"
 
 msgid "Maximum number of routes per router"
 msgstr "Numero massimo di instradamenti per router"
-
-msgid ""
-"Maximum size of an IP packet (MTU) that can traverse the underlying physical "
-"network infrastructure without fragmentation. For instances using a self-"
-"service/private network, neutron subtracts the overlay protocol overhead "
-"from this value and provides it to instances via DHCP option 26. For "
-"example, using a value of 9000, DHCP provides 8950 to instances using a "
-"VXLAN network that contains 50 bytes of overhead. Using a value of 0 "
-"disables this feature and instances typically default to a 1500 MTU. Only "
-"impacts instances, not neutron network components such as bridges and "
-"routers."
-msgstr ""
-"La dimensione massima di un pacchetto IP (MTU) che può attraversare la rete "
-"fisica sottostante senza frammentazione. Per le istanze che utilizzano una "
-"rete self-service/privata, neutron sottrae l'overhead del protocollo di "
-"sovrapposizione da questo valore e lo fornisce alle istanze mediante DHCP "
-"opzione 26. Ad esempio, utilizzando un valore di 9000, DHCP fornisce 8950 "
-"alle istanze che utilizzano una rete VXLAN che contiene 50 byte di overhead. "
-"L'utilizzo di un valore 0 disabilita questa funzione e le istanze vengono in "
-"genere impostate per valore predefinito su una MTU di 1500. Ha impatto solo "
-"sulle istanze e non sui componenti di rete neutron come bridge e router."
 
 msgid ""
 "Metadata Proxy UNIX domain socket mode, 4 values allowed: 'deduce': deduce "
@@ -2447,13 +2386,6 @@ msgid "Minimize polling by monitoring ovsdb for interface changes."
 msgstr ""
 "Ridurre al minimo il polling controllando ovsdb per le modifiche "
 "all'interfaccia."
-
-msgid ""
-"Minimum number of L3 agents which a HA router will be scheduled on. If it is "
-"set to 0 then the router will be scheduled on every agent."
-msgstr ""
-"Numero minimo di agent L3 su cui verrà pianificato un router HA. Se è "
-"impostato su 0, il router verrà pianificato su ciascun agent."
 
 #, python-format
 msgid "Missing key in mapping: '%s'"
@@ -2539,17 +2471,6 @@ msgstr "Il nome '%s' non deve iniziare o terminare con un trattino."
 
 msgid "Name of Open vSwitch bridge to use"
 msgstr "Nome del bridge Open vSwitch da utilizzare"
-
-msgid ""
-"Name of bridge used for external network traffic. This should be set to an "
-"empty value for the Linux Bridge. When this parameter is set, each L3 agent "
-"can be associated with no more than one external network. This option is "
-"deprecated and will be removed in the M release."
-msgstr ""
-"Nome del bridge utilizzato per il traffico di rete esterno. Deve essere "
-"impostato su un valore vuoto per Linux Bridge. Quando questo parametro è "
-"impostato, ciascun agent L3 può essere associato con non più di una rete "
-"esterna. Questa opzione è obsoleta e verrà rimossa nella release M."
 
 msgid ""
 "Name of nova region to use. Useful if keystone manages more than one region."
@@ -2696,9 +2617,6 @@ msgstr "Nessun provider specificato per il servizio '%s', uscita in corso"
 #, python-format
 msgid "No shared key in %s fields"
 msgstr "Nessuna chiave condivisa in %s campi"
-
-msgid "No versions callback provided in ResourceVersionsManager"
-msgstr "Nessun callback di versioni fornito in ResourceVersionsManager"
 
 msgid "Not allowed to manually assign a router to an agent in 'dvr' mode."
 msgstr ""
@@ -4486,14 +4404,6 @@ msgstr ""
 "Il parametro di configurazione max_l3_agents_per_router %(max_agents)s non è "
 "valido. Deve essere maggiore o uguale a min_l3_agents_per_router "
 "%(min_agents)s."
-
-#, python-format
-msgid ""
-"min_l3_agents_per_router config parameter is not valid. It has to be equal "
-"to or more than %s for HA."
-msgstr ""
-"il parametro di configurazione min_l3_agents_per_router non è valido. Deve "
-"essere uguale o maggiore di %s per HA."
 
 msgid "must provide exactly 2 arguments - cidr and MAC"
 msgstr "è necessario fornire esattamente 2 argomenti - cidr e MAC"

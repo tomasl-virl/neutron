@@ -166,6 +166,23 @@ class TestRouterInfo(base.BaseTestCase):
         self.assertEqual(new_mark_ids, new_ri.available_mark_ids)
         self.assertTrue(ri.available_mark_ids != new_ri.available_mark_ids)
 
+    def test_process_delete(self):
+        ri = router_info.RouterInfo(_uuid(), {}, **self.ri_kwargs)
+        ri.router = {'id': _uuid()}
+        with mock.patch.object(ri, '_process_internal_ports') as p_i_p,\
+            mock.patch.object(ri, '_process_external_on_delete') as p_e_o_d:
+            self.mock_ip.netns.exists.return_value = False
+            ri.process_delete(mock.Mock())
+            self.assertFalse(p_i_p.called)
+            self.assertFalse(p_e_o_d.called)
+
+            p_i_p.reset_mock()
+            p_e_o_d.reset_mock()
+            self.mock_ip.netns.exists.return_value = True
+            ri.process_delete(mock.Mock())
+            p_i_p.assert_called_once_with(mock.ANY)
+            p_e_o_d.assert_called_once_with(mock.ANY)
+
 
 class BasicRouterTestCaseFramework(base.BaseTestCase):
     def _create_router(self, router=None, **kwargs):
@@ -422,3 +439,22 @@ class TestFloatingIpWithMockDevice(BasicRouterTestCaseFramework):
             mock.sentinel.interface_name)
         self.assertEqual({}, fip_statuses)
         ri.remove_floating_ip.assert_called_once_with(device, '15.1.2.3/32')
+
+    def test_process_floating_ip_reassignment(self, IPDevice):
+        IPDevice.return_value = device = mock.Mock()
+        device.addr.list.return_value = [{'cidr': '15.1.2.3/32'}]
+
+        fip_id = _uuid()
+        fip = {
+            'id': fip_id, 'port_id': _uuid(),
+            'floating_ip_address': '15.1.2.3',
+            'fixed_ip_address': '192.168.0.3',
+            'status': 'DOWN'
+        }
+        ri = self._create_router()
+        ri.get_floating_ips = mock.Mock(return_value=[fip])
+        ri.move_floating_ip = mock.Mock()
+        ri.fip_map = {'15.1.2.3': '192.168.0.2'}
+
+        ri.process_floating_ip_addresses(mock.sentinel.interface_name)
+        ri.move_floating_ip.assert_called_once_with(fip)

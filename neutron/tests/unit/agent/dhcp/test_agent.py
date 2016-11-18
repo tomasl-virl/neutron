@@ -271,20 +271,6 @@ class TestDhcpAgent(base.BaseTestCase):
                              mock.call().report_state(mock.ANY, mock.ANY,
                                                       mock.ANY)])
 
-    def test_dhcp_agent_main_agent_manager(self):
-        logging_str = 'neutron.agent.common.config.setup_logging'
-        launcher_str = 'oslo_service.service.ServiceLauncher'
-        with mock.patch(logging_str):
-            with mock.patch.object(sys, 'argv') as sys_argv:
-                with mock.patch(launcher_str) as launcher:
-                    sys_argv.return_value = ['dhcp', '--config-file',
-                                             base.etcdir('neutron.conf')]
-                    entry.main()
-                    launcher.assert_has_calls(
-                        [mock.call(cfg.CONF),
-                         mock.call().launch_service(mock.ANY),
-                         mock.call().wait()])
-
     def test_run_completes_single_pass(self):
         with mock.patch(DEVICE_MANAGER):
             dhcp = dhcp_agent.DhcpAgent(HOSTNAME)
@@ -621,12 +607,10 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
             self.external_process.assert_has_calls([
                 self._process_manager_constructor_call(),
                 mock.call().enable()])
-        elif not enable_isolated_metadata:
+        else:
             self.external_process.assert_has_calls([
                 self._process_manager_constructor_call(ns=None),
                 mock.call().disable()])
-        else:
-            self.assertFalse(self.external_process.call_count)
 
     def test_enable_dhcp_helper_enable_metadata_isolated_network(self):
         self._enable_dhcp_helper(isolated_network,

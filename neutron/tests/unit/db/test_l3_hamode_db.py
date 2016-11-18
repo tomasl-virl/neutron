@@ -122,6 +122,10 @@ class L3HATestCase(L3HATestFramework):
             l3_ext_ha_mode.HAMinimumAgentsNumberNotValid,
             self.plugin._check_num_agents_per_router)
 
+    def test_verify_configuration_min_l3_agents_per_router_eq_one(self):
+        cfg.CONF.set_override('min_l3_agents_per_router', 1)
+        self.plugin._check_num_agents_per_router()
+
     def test_verify_configuration_max_l3_agents_below_min_l3_agents(self):
         cfg.CONF.set_override('max_l3_agents_per_router', 3)
         cfg.CONF.set_override('min_l3_agents_per_router', 4)
@@ -744,6 +748,34 @@ class L3HATestCase(L3HATestFramework):
             self.assertEqual(states[router['id']],
                              router[constants.HA_ROUTER_STATE_KEY])
 
+    def test_sync_ha_router_info_ha_interface_port_concurrently_deleted(self):
+        router1 = self._create_router()
+        router2 = self._create_router()
+
+        # retrieve all router ha port bindings
+        bindings = self.plugin.get_ha_router_port_bindings(
+            self.admin_ctx, [router1['id'], router2['id']])
+        self.assertEqual(4, len(bindings))
+
+        routers = self.plugin.get_ha_sync_data_for_host(
+            self.admin_ctx, self.agent1['host'], self.agent1)
+        self.assertEqual(2, len(routers))
+
+        bindings = self.plugin.get_ha_router_port_bindings(
+            self.admin_ctx, [router1['id'], router2['id']],
+            self.agent1['host'])
+        self.assertEqual(2, len(bindings))
+
+        fake_binding = mock.Mock()
+        fake_binding.router_id = router2['id']
+        fake_binding.port = None
+        with mock.patch.object(
+                self.plugin, "get_ha_router_port_bindings",
+                return_value=[bindings[0], fake_binding]):
+            routers = self.plugin.get_ha_sync_data_for_host(
+                self.admin_ctx, self.agent1['host'], self.agent1)
+            self.assertEqual(1, len(routers))
+
     def test_set_router_states_handles_concurrently_deleted_router(self):
         router1 = self._create_router()
         router2 = self._create_router()
@@ -1064,6 +1096,39 @@ class L3HAModeDbTestCase(L3HATestFramework):
             self.admin_ctx, self.agent2['host'], [router])
         port = self._get_first_interface(router['id'])
         self.assertEqual(self.agent1['host'], port[portbindings.HOST_ID])
+
+    def test_is_ha_router_port(self):
+        network_id = self._create_network(self.core_plugin, self.admin_ctx)
+        subnet = self._create_subnet(self.core_plugin, self.admin_ctx,
+                                     network_id)
+        interface_info = {'subnet_id': subnet['id']}
+
+        router = self._create_router()
+        self.plugin.add_router_interface(self.admin_ctx,
+                                         router['id'],
+                                         interface_info)
+        port = self._get_first_interface(router['id'])
+        self.assertTrue(l3_hamode_db.is_ha_router_port(
+            port['device_owner'], port['device_id']))
+
+    def test_is_ha_router_port_for_normal_port(self):
+        network_id = self._create_network(self.core_plugin, self.admin_ctx)
+        subnet = self._create_subnet(self.core_plugin, self.admin_ctx,
+                                     network_id)
+        interface_info = {'subnet_id': subnet['id']}
+
+        router = self._create_router(ha=False)
+        self.plugin.add_router_interface(self.admin_ctx,
+                                         router['id'],
+                                         interface_info)
+        device_filter = {'device_id': [router['id']],
+                         'device_owner':
+                         [constants.DEVICE_OWNER_ROUTER_INTF]}
+        port = self.core_plugin.get_ports(
+            self.admin_ctx, filters=device_filter)[0]
+
+        self.assertFalse(l3_hamode_db.is_ha_router_port(
+            port['device_owner'], port['device_id']))
 
 
 class L3HAUserTestCase(L3HATestFramework):

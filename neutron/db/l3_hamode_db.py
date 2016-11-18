@@ -31,6 +31,7 @@ from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils as n_utils
 from neutron.db import agents_db
+from neutron.db import api as db_api
 from neutron.db.availability_zone import router as router_az_db
 from neutron.db import common_db_mixin
 from neutron.db import l3_attrs_db
@@ -61,10 +62,9 @@ L3_HA_OPTS = [
                       "scheduled on. If it is set to 0 then the router will "
                       "be scheduled on every agent.")),
     cfg.IntOpt('min_l3_agents_per_router',
-               default=constants.MINIMUM_AGENTS_FOR_HA,
-               help=_("Minimum number of L3 agents which a HA router will be "
-                      "scheduled on. If it is set to 0 then the router will "
-                      "be scheduled on every agent.")),
+               default=constants.DEFAULT_MINIMUM_AGENTS_FOR_HA,
+               help=_("Minimum number of L3 agents that have to be available "
+                      "in order to allow a new HA router to be scheduled.")),
     cfg.StrOpt('l3_ha_net_cidr',
                default='169.254.192.0/18',
                help=_('Subnet used for the l3 HA admin network.')),
@@ -178,7 +178,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             raise l3_ha.HAMaximumAgentsNumberNotValid(
                 max_agents=max_agents, min_agents=min_agents)
 
-        if min_agents < constants.MINIMUM_AGENTS_FOR_HA:
+        if min_agents < constants.MINIMUM_MINIMUM_AGENTS_FOR_HA:
             raise l3_ha.HAMinimumAgentsNumberNotValid()
 
     def __init__(self):
@@ -684,7 +684,15 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                                                     routers_dict.keys(),
                                                     host)
         for binding in bindings:
-            port_dict = self._core_plugin._make_port_dict(binding.port)
+            port = binding.port
+            if not port:
+                # Filter the HA router has no ha port here
+                LOG.info(_LI("HA router %s is missing HA router port "
+                             "bindings. Skipping it."),
+                         binding.router_id)
+                routers_dict.pop(binding.router_id)
+                continue
+            port_dict = self._core_plugin._make_port_dict(port)
 
             router = routers_dict.get(binding.router_id)
             router[constants.HA_INTERFACE_KEY] = port_dict
@@ -695,6 +703,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             if interface:
                 self._populate_mtu_and_subnets_for_ports(context, [interface])
 
+        # Could not filter the HA_INTERFACE_KEY here, because a DVR router
+        # with SNAT HA in DVR compute host also does not have that attribute.
         return list(routers_dict.values())
 
     @log_helpers.log_method_call
@@ -750,3 +760,16 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                     n_exc.PortNotFound):
                 # Take concurrently deleted interfaces in to account
                 pass
+
+
+def is_ha_router_port(device_owner, router_id):
+    session = db_api.get_session()
+    if device_owner in [constants.DEVICE_OWNER_ROUTER_INTF,
+                        constants.DEVICE_OWNER_ROUTER_SNAT]:
+        query = session.query(l3_attrs_db.RouterExtraAttributes)
+        query = query.filter_by(ha=True)
+        query = query.filter(l3_attrs_db.RouterExtraAttributes.router_id ==
+                             router_id)
+        return bool(query.limit(1).count())
+    else:
+        return False

@@ -216,11 +216,11 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
                          params=params, subresource=subresource)
 
     def new_delete_request(self, resource, id, fmt=None, subresource=None,
-                           sub_id=None):
+                           sub_id=None, data=None):
         return self._req(
             'DELETE',
             resource,
-            None,
+            data,
             fmt,
             id=id,
             subresource=subresource,
@@ -845,6 +845,15 @@ class TestV2HTTPResponse(NeutronDbPluginV2TestCase):
         req = self.new_delete_request('networks', net['network']['id'])
         res = req.get_response(self.api)
         self.assertEqual(webob.exc.HTTPNoContent.code, res.status_int)
+
+    def test_delete_with_req_body_returns_400(self):
+        res = self._create_network(self.fmt, 'net1', True)
+        net = self.deserialize(self.fmt, res)
+        data = {"network": {"id": net['network']['id']}}
+        req = self.new_delete_request('networks', net['network']['id'],
+                                      data=data)
+        res = req.get_response(self.api)
+        self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
 
     def test_update_returns_200(self):
         with self.network() as net:
@@ -4083,9 +4092,13 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                 mock.patch.object(orm.Session, 'add',
                                   side_effect=db_ref_err_for_ipalloc,
                                   autospec=True).start()
+                v6_subnet = {'ip_version': 6,
+                             'cidr': 'fe80::/64',
+                             'gateway_ip': 'fe80::1',
+                             'tenant_id': v4_subnet['subnet']['tenant_id']}
                 mock.patch.object(db_base_plugin_common.DbBasePluginCommon,
                                   '_get_subnet',
-                                  return_value=mock.Mock()).start()
+                                  return_value=v6_subnet).start()
             # Add an IPv6 auto-address subnet to the network
             with mock.patch.object(manager.NeutronManager.get_plugin(),
                                    'update_port') as mock_updated_port:

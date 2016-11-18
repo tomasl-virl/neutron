@@ -24,6 +24,7 @@ import select
 import shlex
 import signal
 import subprocess
+import time
 
 import fixtures
 import netaddr
@@ -63,7 +64,7 @@ MACVTAP_PREFIX = 'macvtap'
 LB_DEVICE_NAME_MAX_LEN = 10
 
 SS_SOURCE_PORT_PATTERN = re.compile(
-    r'^.*\s+\d+\s+.*:(?P<port>\d+)\s+[0-9:].*')
+    r'^.*\s+\d+\s+.*:(?P<port>\d+)\s+[^\s]+:.*')
 
 READ_TIMEOUT = os.environ.get('OS_TEST_READ_TIMEOUT', 5)
 
@@ -103,10 +104,28 @@ def assert_ping(src_namespace, dst_ip, timeout=1, count=1):
                                  dst_ip])
 
 
+def assert_async_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
+    ipversion = netaddr.IPAddress(dst_ip).version
+    ping_command = 'ping' if ipversion == 4 else 'ping6'
+    ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
+
+    # See bug 1588731 for explanation why using -c count ping option
+    # cannot be used and it needs to be done using the following workaround.
+    for _index in range(count):
+        start_time = time.time()
+        ns_ip_wrapper.netns.execute([ping_command, '-c', '1', '-W', timeout,
+                                     dst_ip])
+        end_time = time.time()
+        diff = end_time - start_time
+        if 0 < diff < interval:
+            # wait at most "interval" seconds between individual pings
+            time.sleep(interval - diff)
+
+
 @contextlib.contextmanager
 def async_ping(namespace, ips):
     with futures.ThreadPoolExecutor(max_workers=len(ips)) as executor:
-        fs = [executor.submit(assert_ping, namespace, ip, count=10)
+        fs = [executor.submit(assert_async_ping, namespace, ip, count=10)
               for ip in ips]
         yield lambda: all(f.done() for f in fs)
         futures.wait(fs)
@@ -155,7 +174,7 @@ def _get_source_ports_from_ss_output(output):
     for line in output.splitlines():
         match = SS_SOURCE_PORT_PATTERN.match(line)
         if match:
-            ports.add(match.group('port'))
+            ports.add(int(match.group('port')))
     return ports
 
 
@@ -250,7 +269,7 @@ class RootHelperProcess(subprocess.Popen):
                                 sleep=CHILD_PROCESS_SLEEP):
         def child_is_running():
             child_pid = utils.get_root_helper_child_pid(
-                self.pid, run_as_root=True)
+                self.pid, self.cmd, run_as_root=True)
             if utils.pid_invoked_with_cmdline(child_pid, self.cmd):
                 return True
 
@@ -260,7 +279,7 @@ class RootHelperProcess(subprocess.Popen):
             exception=RuntimeError("Process %s hasn't been spawned "
                                    "in %d seconds" % (self.cmd, timeout)))
         self.child_pid = utils.get_root_helper_child_pid(
-            self.pid, run_as_root=True)
+            self.pid, self.cmd, run_as_root=True)
 
     @property
     def is_running(self):

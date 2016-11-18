@@ -109,6 +109,18 @@ class FipNamespace(namespaces.Namespace):
                          prefix=FIP_EXT_DEV_PREFIX,
                          mtu=ex_gw_port.get('mtu'))
 
+        # Remove stale fg devices
+        ip_wrapper = ip_lib.IPWrapper(namespace=ns_name)
+        devices = ip_wrapper.get_devices()
+        for device in devices:
+            name = device.name
+            if name.startswith(FIP_EXT_DEV_PREFIX) and name != interface_name:
+                ext_net_bridge = self.agent_conf.external_network_bridge
+                self.driver.unplug(name,
+                                   bridge=ext_net_bridge,
+                                   namespace=ns_name,
+                                   prefix=FIP_EXT_DEV_PREFIX)
+
         ip_cidrs = common_utils.fixed_ip_cidrs(ex_gw_port['fixed_ips'])
         self.driver.init_l3(interface_name, ip_cidrs, namespace=ns_name,
                             clean_connections=True)
@@ -116,8 +128,6 @@ class FipNamespace(namespaces.Namespace):
         self.update_gateway_port(ex_gw_port)
 
         cmd = ['sysctl', '-w', 'net.ipv4.conf.%s.proxy_arp=1' % interface_name]
-        # TODO(Carl) mlavelle's work has self.ip_wrapper
-        ip_wrapper = ip_lib.IPWrapper(namespace=ns_name)
         ip_wrapper.netns.execute(cmd, check_exit_code=False)
 
     def create(self):
@@ -155,6 +165,11 @@ class FipNamespace(namespaces.Namespace):
 
     def delete(self):
         self.destroyed = True
+        self._delete()
+        self.agent_gateway_port = None
+
+    @namespaces.check_ns_existence
+    def _delete(self):
         ip_wrapper = ip_lib.IPWrapper(namespace=self.name)
         for d in ip_wrapper.get_devices(exclude_loopback=True):
             if d.name.startswith(FIP_2_ROUTER_DEV_PREFIX):
@@ -169,7 +184,6 @@ class FipNamespace(namespaces.Namespace):
                                    bridge=ext_net_bridge,
                                    namespace=self.name,
                                    prefix=FIP_EXT_DEV_PREFIX)
-        self.agent_gateway_port = None
 
         # TODO(mrsmith): add LOG warn if fip count != 0
         LOG.debug('DVR: destroy fip namespace: %s', self.name)
@@ -264,8 +278,6 @@ class FipNamespace(namespaces.Namespace):
 
         # add default route for the link local interface
         rtr_2_fip_dev.route.add_gateway(str(fip_2_rtr.ip), table=FIP_RT_TBL)
-        #setup the NAT rules and chains
-        ri._handle_fip_nat_rules(rtr_2_fip_name)
 
     def scan_fip_ports(self, ri):
         # don't scan if not dvr or count is not None
@@ -277,11 +289,4 @@ class FipNamespace(namespaces.Namespace):
         rtr_2_fip_interface = self.get_rtr_ext_device_name(ri.router_id)
         device = ip_lib.IPDevice(rtr_2_fip_interface, namespace=ri.ns_name)
         if device.exists():
-            existing_cidrs = [addr['cidr'] for addr in device.addr.list()]
-            fip_cidrs = [c for c in existing_cidrs if
-                         common_utils.is_cidr_host(c)]
-            for fip_cidr in fip_cidrs:
-                fip_ip = fip_cidr.split('/')[0]
-                rule_pr = self._rule_priorities.allocate(fip_ip)
-                ri.floating_ips_dict[fip_ip] = rule_pr
-            ri.dist_fip_count = len(fip_cidrs)
+            ri.dist_fip_count = len(ri.get_router_cidrs(device))

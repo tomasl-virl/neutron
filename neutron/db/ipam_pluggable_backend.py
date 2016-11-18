@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
+
 import netaddr
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -28,7 +30,6 @@ from neutron.db import ipam_backend_mixin
 from neutron.db import models_v2
 from neutron.ipam import driver
 from neutron.ipam import exceptions as ipam_exc
-from neutron.ipam import requests as ipam_req
 
 
 LOG = logging.getLogger(__name__)
@@ -137,9 +138,6 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         return allocated
 
     def _ipam_update_allocation_pools(self, context, ipam_driver, subnet):
-        self.validate_allocation_pools(subnet['allocation_pools'],
-                                       subnet['cidr'])
-
         factory = ipam_driver.get_subnet_request_factory()
         subnet_request = factory.get_request(context, subnet, None)
 
@@ -358,22 +356,22 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                                   port['fixed_ips'])
 
     def update_db_subnet(self, context, id, s, old_pools):
+        # 'allocation_pools' is removed from 's' in
+        # _update_subnet_allocation_pools (ipam_backend_mixin),
+        # so create unchanged copy for ipam driver
+        subnet_copy = copy.deepcopy(s)
+        subnet, changes = super(IpamPluggableBackend, self).update_db_subnet(
+            context, id, s, old_pools)
         ipam_driver = driver.Pool.get_instance(None, context)
-        if "allocation_pools" in s:
-            self._ipam_update_allocation_pools(context, ipam_driver, s)
 
-        try:
-            subnet, changes = super(IpamPluggableBackend,
-                                    self).update_db_subnet(context, id,
-                                                           s, old_pools)
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                if "allocation_pools" in s and old_pools:
-                    LOG.error(
-                        _LE("An exception occurred during subnet update. "
-                            "Reverting allocation pool changes"))
-                    s['allocation_pools'] = old_pools
-                    self._ipam_update_allocation_pools(context, ipam_driver, s)
+        # Set old allocation pools if no new pools are provided by user.
+        # Passing old pools allows to call ipam driver on each subnet update
+        # even if allocation pools are not changed. So custom ipam drivers
+        # are able to track other fields changes on subnet update.
+        if 'allocation_pools' not in subnet_copy:
+            subnet_copy['allocation_pools'] = old_pools
+        self._ipam_update_allocation_pools(context, ipam_driver, subnet_copy)
+
         return subnet, changes
 
     def add_auto_addrs_on_network_ports(self, context, subnet, ipam_subnet):
@@ -386,10 +384,14 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                      ~models_v2.Port.device_owner.in_(
                          constants.ROUTER_INTERFACE_OWNERS_SNAT)))
             updated_ports = []
+            ipam_driver = driver.Pool.get_instance(None, context)
+            factory = ipam_driver.get_address_request_factory()
             for port in ports:
-                ip_request = ipam_req.AutomaticAddressRequest(
-                    prefix=subnet['cidr'],
-                    mac=port['mac_address'])
+                ip = {'subnet_id': subnet['id'],
+                      'subnet_cidr': subnet['cidr'],
+                      'eui64_address': True,
+                      'mac': port['mac_address']}
+                ip_request = factory.get_request(context, port, ip)
                 ip_address = ipam_subnet.allocate(ip_request)
                 allocated = models_v2.IPAllocation(network_id=network_id,
                                                    port_id=port['id'],

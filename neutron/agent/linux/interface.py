@@ -44,9 +44,9 @@ OPTS = [
     cfg.IntOpt('network_device_mtu',
                deprecated_for_removal=True,
                help=_('MTU setting for device. This option will be removed in '
-                      'Newton. Please use the system-wide segment_mtu setting '
-                      'which the agents will take into account when wiring '
-                      'VIFs.')),
+                      'Newton. Please use the system-wide global_physnet_mtu '
+                      'setting which the agents will take into account when '
+                      'wiring VIFs.')),
 ]
 
 
@@ -337,6 +337,15 @@ class OVSInterfaceDriver(LinuxInterfaceDriver):
 
         ns_dev.link.set_address(mac_address)
 
+        # Add an interface created by ovs to the namespace.
+        if not self.conf.ovs_use_veth and namespace:
+            namespace_obj = ip.ensure_namespace(namespace)
+            namespace_obj.add_device_to_namespace(ns_dev)
+
+        # NOTE(ihrachys): the order here is significant: we must set MTU after
+        # the device is moved into a namespace, otherwise OVS bridge does not
+        # allow to set MTU that is higher than the least of all device MTUs on
+        # the bridge
         mtu = self.conf.network_device_mtu or mtu
         if mtu:
             ns_dev.link.set_mtu(mtu)
@@ -344,10 +353,6 @@ class OVSInterfaceDriver(LinuxInterfaceDriver):
                 root_dev.link.set_mtu(mtu)
         else:
             LOG.warning(_LW("No MTU configured for port %s"), port_id)
-        # Add an interface created by ovs to the namespace.
-        if not self.conf.ovs_use_veth and namespace:
-            namespace_obj = ip.ensure_namespace(namespace)
-            namespace_obj.add_device_to_namespace(ns_dev)
 
         ns_dev.link.set_up()
         if self.conf.ovs_use_veth:

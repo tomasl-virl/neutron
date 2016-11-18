@@ -377,15 +377,17 @@ class HaRouter(router.RouterInfo):
                                prefix=router.EXTERNAL_DEV_PREFIX)
 
     def delete(self, agent):
-        super(HaRouter, self).delete(agent)
         self.destroy_state_change_monitor(self.process_monitor)
-        self.ha_network_removed()
         self.disable_keepalived()
+        self.ha_network_removed()
+        super(HaRouter, self).delete(agent)
 
     def process(self, agent):
         super(HaRouter, self).process(agent)
 
-        if self.ha_port:
+        self.ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
+        if (self.ha_port and
+                self.ha_port['status'] == n_consts.PORT_STATUS_ACTIVE):
             self.enable_keepalived()
 
     @common_utils.synchronized('enable_radvd')

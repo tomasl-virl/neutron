@@ -8,17 +8,18 @@
 # Sungjin Kang <potopro@gmail.com>, 2013
 # Sungjin Kang <potopro@gmail.com>, 2013
 # Sungjin Kang <potopro@gmail.com>, 2013
+# Jun-Sik Shin <jsshin@smartx.kr>, 2016. #zanata
 # Sungjin Kang <gang.sungjin@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 8.0.1.dev84\n"
+"Project-Id-Version: neutron 8.2.1.dev52\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2016-04-20 11:10+0000\n"
+"POT-Creation-Date: 2016-09-01 18:10+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-04-19 11:58+0000\n"
-"Last-Translator: SeYeon Lee <sy_lee@kr.ibm.com>\n"
+"PO-Revision-Date: 2016-09-01 01:22+0000\n"
+"Last-Translator: Jun-Sik Shin <jsshin@smartx.kr>\n"
 "Language: ko-KR\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 "Generated-By: Babel 2.0\n"
@@ -344,15 +345,6 @@ msgstr ""
 "이 IP 제품군의 기본 subnetpool이 이미 설정되었습니다. IP 제품군당 기본값은 하"
 "나만 있을 수 있습니다."
 
-msgid ""
-"A list of mappings of physical networks to MTU values. The format of the "
-"mapping is <physnet>:<mtu val>. This mapping allows specifying a physical "
-"network MTU value that differs from the default segment_mtu value."
-msgstr ""
-"MTU 값에 대한 실제 네트워크의 맵핑 목록입니다. 맵핑 형식은 <physnet>:<mtu "
-"val>입니다. 이 맵핑을 사용하면 기본 segment_mtu 값과 다른 실제 네트워크 MTU "
-"값을 지정할 수 있습니다."
-
 msgid "A metering driver must be specified"
 msgstr "측정 드라이버를 지정해야 함"
 
@@ -675,6 +667,9 @@ msgstr "브릿지 %s이(가) 없음"
 msgid "Bulk operation not supported"
 msgstr "Bulk 오퍼레이션은 지원되지 않음"
 
+msgid "CA certificate file to use to verify connecting clients"
+msgstr "클라이언트 연결을 확인하기 위해 사용하는 CA 인증 파일"
+
 msgid "CIDR to monitor"
 msgstr "모니터할 CIDR"
 
@@ -970,6 +965,10 @@ msgstr "쉼표로 분리된 DNS 서버의 목록이며 전달자로 사용됩니
 
 msgid "Command to execute"
 msgstr "실행할 명령"
+
+#, python-format
+msgid "Commands %(commands)s exceeded timeout %(timeout)d seconds"
+msgstr "명령 %(commands)s 이(가) 제한시간 %(timeout)d 를 초과하였습니다."
 
 msgid "Config file for interface driver (You may also use l3_agent.ini)"
 msgstr "인터페이스 드라이버에 대한 구성 파일(l3_agent.ini도 사용할 수 있음)"
@@ -1548,6 +1547,10 @@ msgid "Failed scheduling router %(router_id)s to the L3 Agent %(agent_id)s."
 msgstr ""
 "L3 에이전트 %(agent_id)s에 대한 %(router_id)s 라우터를 스케줄링하지 못했습니"
 "다. "
+
+#, python-format
+msgid "Failed to add interfaces: %(ifaces)s"
+msgstr "인터페이스 추가 실패: %(ifaces)s"
 
 #, python-format
 msgid ""
@@ -2166,8 +2169,10 @@ msgstr ""
 msgid "Local IP address of the VXLAN endpoints."
 msgstr "VXLAN 엔드포인트의 로컬 IP 주소."
 
-msgid "Local IP address of tunnel endpoint."
-msgstr "터널 엔드포인트의 로컬 IP 주소입니다."
+msgid ""
+"Local IP address of tunnel endpoint. Can be either an IPv4 or IPv6 address."
+msgstr ""
+"터널 엔드 포인트의 로컬 IP 주소입니다. IPv4 또는 IPv6  주소가 가능합니다."
 
 msgid "Location for Metadata Proxy UNIX domain socket."
 msgstr "메타데이터 프록시 UNIX 도메인 소켓 위치입니다."
@@ -2198,27 +2203,6 @@ msgstr "로그 에이전트 하트비트"
 
 msgid "Loopback IP subnet is not supported if enable_dhcp is True."
 msgstr "enable_dhcp가 True인 경우 루프백 IP 서브넷이 지원되지 않습니다."
-
-msgid ""
-"MTU of the underlying physical network. Neutron uses this value to calculate "
-"MTU for all virtual network components. For flat and VLAN networks, neutron "
-"uses this value without modification. For overlay networks such as VXLAN, "
-"neutron automatically subtracts the overlay protocol overhead from this "
-"value. Defaults to 1500, the standard value for Ethernet."
-msgstr ""
-"기본 물리 네트워크의 MTU입니다. Neutron에서는 이 값을 사용하여 모든 가상 네트"
-"워크 구성 요소의 MTU를 계산합니다. 일반 및 VLAN 네트워크의 경우 neutron에서"
-"는 이 값을 수정하지 않고 사용합니다. VXLAN과 같은 오버레이 네트워크의 경우 "
-"neutron이 이 값에서 오버레이 프로토콜 오버헤드를 자동으로 제거합니다. 이더넷"
-"의 표준 값인 1500으로 기본값이 지정됩니다."
-
-msgid ""
-"MTU setting for device. This option will be removed in Newton. Please use "
-"the system-wide segment_mtu setting which the agents will take into account "
-"when wiring VIFs."
-msgstr ""
-"장치의 MTU 설정입니다. 이 옵션은 Newton에서 제거됩니다. VIF를 연결할 때 에이"
-"전트에서 고려할 시스템 전체 segment_mtu 설정을 사용하십시오."
 
 msgid "MTU size of veth interfaces"
 msgstr "veth 인터페이스의 MTU 크기"
@@ -2261,24 +2245,6 @@ msgstr "서브넷당 호스트 라우트의 최대 수"
 
 msgid "Maximum number of routes per router"
 msgstr "라우터당 최대 경로 수"
-
-msgid ""
-"Maximum size of an IP packet (MTU) that can traverse the underlying physical "
-"network infrastructure without fragmentation. For instances using a self-"
-"service/private network, neutron subtracts the overlay protocol overhead "
-"from this value and provides it to instances via DHCP option 26. For "
-"example, using a value of 9000, DHCP provides 8950 to instances using a "
-"VXLAN network that contains 50 bytes of overhead. Using a value of 0 "
-"disables this feature and instances typically default to a 1500 MTU. Only "
-"impacts instances, not neutron network components such as bridges and "
-"routers."
-msgstr ""
-"단편화를 사용하지 않고 기본 물리 네트워크 인프라를 횡단할 수 있는 IP 패킷"
-"(MTU)의 최대 크기입니다. 셀프 서비스/개인 네트워크를 사용하는 인스턴스의 경"
-"우 neutron이 이 값에서 오버레이 프로토콜 오버헤드를 빼고 DHCP 옵션 26을 통해 "
-"인스턴스에 제공합니다. 예를 들어, 9000이라는 값을 사용하는 경우 DHCP는 50바이"
-"트의 오버헤드가 포함된 VXLAN 네트워크를 사용하는 인스턴스에 8950을 제공합니"
-"다. "
 
 msgid ""
 "Metadata Proxy UNIX domain socket mode, 4 values allowed: 'deduce': deduce "
@@ -2325,13 +2291,6 @@ msgstr "radvd.conf의 MinRtrAdvInterval 설정"
 
 msgid "Minimize polling by monitoring ovsdb for interface changes."
 msgstr "인터페이스 변경사항에 대한 ovsdb를 모니터링하여 폴링을 최소화합니다."
-
-msgid ""
-"Minimum number of L3 agents which a HA router will be scheduled on. If it is "
-"set to 0 then the router will be scheduled on every agent."
-msgstr ""
-"HA 라우터가 스케줄될 최소 L3 에이전트 수입니다. 이 수가 0으로 설정되면 라우터"
-"가 모든 에이전트에서 스케줄됩니다."
 
 #, python-format
 msgid "Missing key in mapping: '%s'"
@@ -2412,13 +2371,11 @@ msgstr "사용할 Open vSwitch 브릿지 이름"
 msgid ""
 "Name of bridge used for external network traffic. This should be set to an "
 "empty value for the Linux Bridge. When this parameter is set, each L3 agent "
-"can be associated with no more than one external network. This option is "
-"deprecated and will be removed in the M release."
+"can be associated with no more than one external network."
 msgstr ""
 "외부 네트워크 트래픽에 사용되는 브릿지 이름입니다. Linux Bridge는 빈 값으로 "
 "설정해야 합니다. 이 매개변수가 설정되면 각 L3 에이전트를 두 개 이상의 외부 네"
-"트워크에 연관시킬 수 있습니다. 이 옵션은 더 이상 사용되지 않으므로 M 릴리스에"
-"서 제거됩니다."
+"트워크에 연관시킬수 없습니다."
 
 msgid ""
 "Name of nova region to use. Useful if keystone manages more than one region."
@@ -2567,9 +2524,6 @@ msgstr "'%s' 서비스에 대해 제공자가 지정되지 않음, 종료하는 
 #, python-format
 msgid "No shared key in %s fields"
 msgstr "%s 필드의 공유 키가 없음"
-
-msgid "No versions callback provided in ResourceVersionsManager"
-msgstr "ResourceVersionsManager에 버전 콜백이 제공되지 않음"
 
 msgid "Not allowed to manually assign a router to an agent in 'dvr' mode."
 msgstr "'dvr' 모드에서 수동으로 에이전트에 라우터를 지정할 수 없습니다."
@@ -3012,6 +2966,9 @@ msgstr ""
 
 msgid "Request Failed: internal server error while processing your request."
 msgstr "요청 실패: 요청을 처리하는 중에 내부 서버 오류가 발생했습니다. "
+
+msgid "Request body is not supported in DELETE."
+msgstr "DELETE에서 요청 본문을 지원하지 않습니다."
 
 #, python-format
 msgid ""
@@ -4262,14 +4219,6 @@ msgstr ""
 "max_l3_agents_per_router %(max_agents)s 구성 매개변수가 올바르지 않습니다. "
 "min_l3_agents_per_router와 같거나 이보다 커야 합니다.%(min_agents)s과(와) 연"
 "관되어 있습니다."
-
-#, python-format
-msgid ""
-"min_l3_agents_per_router config parameter is not valid. It has to be equal "
-"to or more than %s for HA."
-msgstr ""
-"min_l3_agents_per_router 구성 매개변수가 올바르지 않습니다.HA의 %s과(와) 동일"
-"하거나 이상이어야 합니다."
 
 msgid "must provide exactly 2 arguments - cidr and MAC"
 msgstr "정확히 두 개의 인수 - cidr 및 MAC를 제공해야 함"

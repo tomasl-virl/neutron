@@ -15,17 +15,18 @@
 # Tom Cocozzello <tjcocozz@us.ibm.com>, 2015. #zanata
 # Akihiro Motoki <amotoki@gmail.com>, 2016. #zanata
 # Tsutomu Kimura <ebb0de2@jp.ibm.com>, 2016. #zanata
+# Yuta Hono <yuta.hono@ntt.com>, 2016. #zanata
 # 笹原 昌美 <ebb0de1@jp.ibm.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 8.0.1.dev68\n"
+"Project-Id-Version: neutron 8.2.1.dev52\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2016-04-18 20:06+0000\n"
+"POT-Creation-Date: 2016-09-01 18:10+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-04-16 09:56+0000\n"
-"Last-Translator: Tsutomu Kimura <ebb0de2@jp.ibm.com>\n"
+"PO-Revision-Date: 2016-06-21 12:39+0000\n"
+"Last-Translator: Yuta Hono <yuta.hono@ntt.com>\n"
 "Language: ja\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 "Generated-By: Babel 2.0\n"
@@ -349,15 +350,6 @@ msgid ""
 msgstr ""
 "この IP ファミリーに対するデフォルトのサブネットプールが既に設定されていま"
 "す。IP ファミリーごとにデフォルトは 1 つしか設定できません。"
-
-msgid ""
-"A list of mappings of physical networks to MTU values. The format of the "
-"mapping is <physnet>:<mtu val>. This mapping allows specifying a physical "
-"network MTU value that differs from the default segment_mtu value."
-msgstr ""
-"物理ネットワークから MTU 値へのマッピングのリスト。このマッピングの形式は"
-"<physnet>:<mtu val> です。このマッピングを使用して、デフォルトのsegment_mtu "
-"値とは異なる物理ネットワーク MTU 値を指定できます。"
 
 msgid "A metering driver must be specified"
 msgstr "計測ドライバーを指定する必要があります"
@@ -698,6 +690,9 @@ msgstr "ブリッジ %s は存在しません"
 
 msgid "Bulk operation not supported"
 msgstr "バルク操作はサポートされていません"
+
+msgid "CA certificate file to use to verify connecting clients"
+msgstr "接続クライアントを検査するために使用される CA 証明書ファイル"
 
 msgid "CIDR to monitor"
 msgstr "モニター対象の CIDR"
@@ -2248,9 +2243,6 @@ msgstr ""
 msgid "Local IP address of the VXLAN endpoints."
 msgstr "VXLAN エンドポイントのローカル IP アドレス。"
 
-msgid "Local IP address of tunnel endpoint."
-msgstr "トンネルエンドポイントのローカル IP アドレス。"
-
 msgid "Location for Metadata Proxy UNIX domain socket."
 msgstr "メタデータプロキシー UNIX ドメインソケットのロケーション。"
 
@@ -2282,29 +2274,6 @@ msgid "Loopback IP subnet is not supported if enable_dhcp is True."
 msgstr ""
 "enable_dhcp が True の場合は、ループバック IP サブネットはサポートされませ"
 "ん。"
-
-msgid ""
-"MTU of the underlying physical network. Neutron uses this value to calculate "
-"MTU for all virtual network components. For flat and VLAN networks, neutron "
-"uses this value without modification. For overlay networks such as VXLAN, "
-"neutron automatically subtracts the overlay protocol overhead from this "
-"value. Defaults to 1500, the standard value for Ethernet."
-msgstr ""
-"基盤となる物理ネットワークの MTU。Neutron はこの値を使用して、すべての仮想"
-"ネットワークのコンポーネントの MTU を計算します。フラットネットワークおよび "
-"VLAN ネットワークの場合は、Neutron はこの値を変更することなく使用します。"
-"VXLAN のようなオーバーレイネットワークの場合は、Neutron はこの値からオーバー"
-"レイプロトコルオーバーヘッドの値を自動的に減算します。デフォルト値は "
-"Ethernet の標準値である 1500 です。"
-
-msgid ""
-"MTU setting for device. This option will be removed in Newton. Please use "
-"the system-wide segment_mtu setting which the agents will take into account "
-"when wiring VIFs."
-msgstr ""
-"デバイスの MTU 設定。このオプションは Newton では削除されます。VIF のワイヤリ"
-"ングを行う際にエージェントが考慮に入れる、システム全体に関する segment_mtu 設"
-"定を使用してください。"
 
 msgid "MTU size of veth interfaces"
 msgstr "veth インターフェースの MTU サイズ"
@@ -2347,27 +2316,6 @@ msgstr "サブネットごとのホスト経路の最大数"
 
 msgid "Maximum number of routes per router"
 msgstr "ルーターごとに設定可能な経路の最大数"
-
-msgid ""
-"Maximum size of an IP packet (MTU) that can traverse the underlying physical "
-"network infrastructure without fragmentation. For instances using a self-"
-"service/private network, neutron subtracts the overlay protocol overhead "
-"from this value and provides it to instances via DHCP option 26. For "
-"example, using a value of 9000, DHCP provides 8950 to instances using a "
-"VXLAN network that contains 50 bytes of overhead. Using a value of 0 "
-"disables this feature and instances typically default to a 1500 MTU. Only "
-"impacts instances, not neutron network components such as bridges and "
-"routers."
-msgstr ""
-"フラグメント化することなく基盤となる物理ネットワークインフラを通過する IP パ"
-"ケットの最大サイズ (MTU)。セルフサービスネットワークやプライベートネットワー"
-"クを使用するインスタンスの場合、neutron はこの値からオーバーレイプロトコルの"
-"オーバーヘッドを減算し、DHCP のオプション 26 経由でインスタンスに提供します。"
-"例えば、9000 の値を使用すると、50 バイトのオーバーヘッドを含む VXLAN ネット"
-"ワークを使用するインスタンスに対して、DHCP は 8950 を提供します。0 の値を使用"
-"するとこの機能は無効化され、インスタンスは通常 MTU のデフォルト値として 1500 "
-"を使用します。MTU はインスタンスにのみ影響し、ブリッジやルーターのような "
-"neutron ネットワークのコンポーネントには影響しません。"
 
 msgid ""
 "Metadata Proxy UNIX domain socket mode, 4 values allowed: 'deduce': deduce "
@@ -2418,13 +2366,6 @@ msgid "Minimize polling by monitoring ovsdb for interface changes."
 msgstr ""
 "インターフェース変更の検出に関して ovsdb をモニターすることでポーリングが最小"
 "化されます。"
-
-msgid ""
-"Minimum number of L3 agents which a HA router will be scheduled on. If it is "
-"set to 0 then the router will be scheduled on every agent."
-msgstr ""
-"HA ルーターがスケジュール設定される L3 エージェントの最小数。この値を 0 に設"
-"定すると、ルーターはすべてのエージェントに対してスケジュール設定されます。"
 
 #, python-format
 msgid "Missing key in mapping: '%s'"
@@ -2510,17 +2451,6 @@ msgstr "名前 '%s の先頭または末尾にハイフンを使用してはな�
 
 msgid "Name of Open vSwitch bridge to use"
 msgstr "使用する Open vSwitch ブリッジの名前"
-
-msgid ""
-"Name of bridge used for external network traffic. This should be set to an "
-"empty value for the Linux Bridge. When this parameter is set, each L3 agent "
-"can be associated with no more than one external network. This option is "
-"deprecated and will be removed in the M release."
-msgstr ""
-"外部のネットワークトラフィックが使用できるブリッジの名前。Linux Bridge に関し"
-"ては 空の値を設定する必要があります。このパラメーターを設定すると、各 L3 エー"
-"ジェントには 1 つの外部ネットワークしか割り当てることができなくなります。この"
-"オプションは、M リリースでは提供を終了する予定です。"
 
 msgid ""
 "Name of nova region to use. Useful if keystone manages more than one region."
@@ -2676,9 +2606,6 @@ msgstr "'%s' サービスに対して指定されたプロバイダーはあり�
 #, python-format
 msgid "No shared key in %s fields"
 msgstr "%s フィールドに共有鍵が存在しません"
-
-msgid "No versions callback provided in ResourceVersionsManager"
-msgstr "ResourceVersionsManager ではバージョンのコールバックは提供されません"
 
 msgid "Not allowed to manually assign a router to an agent in 'dvr' mode."
 msgstr ""
@@ -4435,14 +4362,6 @@ msgid ""
 msgstr ""
 "max_l3_agents_per_router %(max_agents)s 構成パラメーターが無効です。"
 "min_l3_agents_per_router %(min_agents)s 以上でなければなりません。"
-
-#, python-format
-msgid ""
-"min_l3_agents_per_router config parameter is not valid. It has to be equal "
-"to or more than %s for HA."
-msgstr ""
-"min_l3_agents_per_router 構成パラメーターが無効です。HA では、%s 以上でなけれ"
-"ばなりません。"
 
 msgid "must provide exactly 2 arguments - cidr and MAC"
 msgstr "必ず 2 つの引数 (cidr および MAC) を提供する必要があります"

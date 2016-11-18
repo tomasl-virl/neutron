@@ -120,10 +120,7 @@ class BaseOVS(object):
 
         self.ovsdb.add_br(bridge_name,
                           datapath_type).execute()
-        br = OVSBridge(bridge_name)
-        # Don't return until vswitchd sets up the internal port
-        br.get_port_ofport(bridge_name)
-        return br
+        return OVSBridge(bridge_name)
 
     def delete_bridge(self, bridge_name):
         self.ovsdb.del_br(bridge_name).execute()
@@ -221,8 +218,6 @@ class OVSBridge(BaseOVS):
             if secure_mode:
                 txn.add(self.ovsdb.set_fail_mode(self.br_name,
                                                  FAILMODE_SECURE))
-        # Don't return until vswitchd sets up the internal port
-        self.get_port_ofport(self.br_name)
 
     def destroy(self):
         self.delete_bridge(self.br_name)
@@ -248,8 +243,6 @@ class OVSBridge(BaseOVS):
             if interface_attr_tuples:
                 txn.add(self.ovsdb.db_set('Interface', port_name,
                                           *interface_attr_tuples))
-        # Don't return until the port has been assigned by vswitchd
-        self.get_port_ofport(port_name)
 
     def delete_port(self, port_name):
         self.ovsdb.del_port(port_name, self.br_name).execute()
@@ -403,7 +396,7 @@ class OVSBridge(BaseOVS):
                 execute(check_error=check_error, log_errors=log_errors))
 
     # returns a VIF object for each VIF port
-    def get_vif_ports(self):
+    def get_vif_ports(self, ofport_filter=None):
         edge_ports = []
         port_info = self.get_ports_attributes(
             'Interface', columns=['name', 'external_ids', 'ofport'],
@@ -412,6 +405,8 @@ class OVSBridge(BaseOVS):
             name = port['name']
             external_ids = port['external_ids']
             ofport = port['ofport']
+            if ofport_filter and ofport in ofport_filter:
+                continue
             if "iface-id" in external_ids and "attached-mac" in external_ids:
                 p = VifPort(name, ofport, external_ids["iface-id"],
                             external_ids["attached-mac"], self)
