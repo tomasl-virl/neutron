@@ -435,7 +435,8 @@ def get_keystone_url(conf):
              'host': conf.auth_host,
              'port': conf.auth_port})
     # NOTE(ihrachys): all existing consumers assume version 2.0
-    return '%s/v2.0/' % auth_uri
+    # NOTE(mirlos): VIRL should be 3 by now
+    return '%s/v3/' % auth_uri
 
 
 def ip_to_cidr(ip, prefix=None):
