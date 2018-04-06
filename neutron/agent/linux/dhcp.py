@@ -338,22 +338,30 @@ class Dnsmasq(DhcpLocalProcess):
             ]
 
         possible_leases = 0
+        enable_ra = False
         for i, subnet in enumerate(self.network.subnets):
-            mode = None
+            mode = []
             # if a subnet is specified to have dhcp disabled
             if not subnet.enable_dhcp:
                 continue
             if subnet.ip_version == 4:
-                mode = 'static'
+                mode.append('static')
             else:
                 # Note(scollins) If the IPv6 attributes are not set, set it as
                 # static to preserve previous behavior
                 addr_mode = getattr(subnet, 'ipv6_address_mode', None)
                 ra_mode = getattr(subnet, 'ipv6_ra_mode', None)
+
+                enable_ra |= ra_mode in constants.IPV6_MODES
+                if ra_mode == constants.IPV6_SLAAC:
+                    mode.append('slaac')
+                elif ra_mode == constants.DHCPV6_STATELESS:
+                    mode.append('ra-stateless')
+
                 if (addr_mode in [constants.DHCPV6_STATEFUL,
                                   constants.DHCPV6_STATELESS] or
                         not addr_mode and not ra_mode):
-                    mode = 'static'
+                    mode.append('static')
 
             cidr = netaddr.IPNetwork(subnet.cidr)
 
@@ -364,6 +372,7 @@ class Dnsmasq(DhcpLocalProcess):
 
             # mode is optional and is not set - skip it
             if mode:
+                mode = ','.join(mode)
                 if subnet.ip_version == 4:
                     cmd.append('--dhcp-range=%s%s,%s,%s,%s' %
                                ('set:', self._TAG_PREFIX % i,
@@ -374,6 +383,10 @@ class Dnsmasq(DhcpLocalProcess):
                                 cidr.network, mode,
                                 cidr.prefixlen, lease))
                 possible_leases += cidr.size
+
+        if enable_ra:
+            cmd.append('--enable-ra')
+            cmd.append('--ra-param=*,low,0,0');
 
         if cfg.CONF.advertise_mtu:
             mtu = getattr(self.network, 'mtu', 0)
