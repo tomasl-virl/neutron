@@ -338,7 +338,7 @@ class Dnsmasq(DhcpLocalProcess):
             ]
 
         possible_leases = 0
-        enable_ra = False
+        ra_enabled = False
         for i, subnet in enumerate(self.network.subnets):
             mode = []
             # if a subnet is specified to have dhcp disabled
@@ -352,7 +352,7 @@ class Dnsmasq(DhcpLocalProcess):
                 addr_mode = getattr(subnet, 'ipv6_address_mode', None)
                 ra_mode = getattr(subnet, 'ipv6_ra_mode', None)
 
-                enable_ra |= ra_mode in constants.IPV6_MODES
+                ra_enabled |= ra_mode in constants.IPV6_MODES
                 if ra_mode == constants.IPV6_SLAAC:
                     mode.append('slaac')
                 elif ra_mode == constants.DHCPV6_STATELESS:
@@ -384,7 +384,7 @@ class Dnsmasq(DhcpLocalProcess):
                                 cidr.prefixlen, lease))
                 possible_leases += cidr.size
 
-        if enable_ra:
+        if ra_enabled:
             cmd.append('--enable-ra')
             cmd.append('--ra-param=*,low,0,0');
 
@@ -1258,9 +1258,12 @@ class DeviceManager(object):
 
             self.fill_dhcp_udp_checksums(namespace=network.namespace)
         ip_cidrs = []
+        ra_enabled = any(getattr(subnet, 'ipv6_ra_mode', None) in constants.IPV6_MODES
+                         for subnet in network.subnets if subnet.ip_version == 6)
         for fixed_ip in port.fixed_ips:
             subnet = fixed_ip.subnet
-            if not ipv6_utils.is_auto_address_subnet(subnet):
+            # router advertisement does not work without global ipv6 address
+            if ra_enabled or not ipv6_utils.is_auto_address_subnet(subnet):
                 net = netaddr.IPNetwork(subnet.cidr)
                 ip_cidr = '%s/%s' % (fixed_ip.ip_address, net.prefixlen)
                 ip_cidrs.append(ip_cidr)
